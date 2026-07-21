@@ -1,8 +1,17 @@
 :root {
   color: #111318;
   font-family:
-    -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic UI",
-    "Yu Gothic", system-ui, "Segoe UI", sans-serif;
+    "Hiragino Maru Gothic ProN",
+    "Hiragino Maru Gothic Pro",
+    "Zen Maru Gothic",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Hiragino Sans",
+    "Yu Gothic UI",
+    "Yu Gothic",
+    system-ui,
+    "Segoe UI",
+    sans-serif;
   font-synthesis: none;
   font-kerning: normal;
   font-optical-sizing: auto;
