@@ -1,15 +1,11 @@
 :root {
   color: #111318;
   font-family:
-    ui-rounded,
-    "Hiragino Maru Gothic ProN",
-    "Hiragino Sans",
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
+    -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic UI",
+    "Yu Gothic", system-ui, "Segoe UI", sans-serif;
   font-synthesis: none;
+  font-kerning: normal;
+  font-optical-sizing: auto;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   --ink: #111318;
@@ -17,6 +13,9 @@
   --paper: #f4f4f0;
   --line: #d7d9d5;
   --accent: #a3d21b;
+  --text-meta: 0.6875rem;
+  --text-label: 0.75rem;
+  --text-secondary: 0.875rem;
 }
 
 * {
@@ -45,6 +44,25 @@ a {
   text-decoration: none;
 }
 
+:lang(ja) {
+  line-break: strict;
+}
+
+.cjk-phrase {
+  overflow-wrap: normal;
+  line-break: strict;
+  text-wrap: pretty;
+  word-break: keep-all;
+}
+
+h1.cjk-phrase,
+h2.cjk-phrase,
+h3.cjk-phrase,
+h4.cjk-phrase,
+.hero__statement.cjk-phrase {
+  text-wrap: balance;
+}
+
 .home {
   min-height: 100%;
 }
@@ -53,7 +71,7 @@ a {
   position: relative;
   display: grid;
   min-height: 100svh;
-  padding: 1.5rem clamp(1.25rem, 4vw, 4.5rem);
+  padding: 1.5rem min(4vw, 4.5rem);
   place-items: center;
   overflow: hidden;
   background: #ffffff;
@@ -68,8 +86,10 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1.5rem clamp(1.25rem, 4vw, 4.5rem);
-  font-size: 0.75rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 1.5rem min(4vw, 4.5rem);
+  font-size: var(--text-label);
   font-weight: 700;
   letter-spacing: 0.08em;
 }
@@ -116,7 +136,7 @@ a {
   padding: 0.42rem 0.7rem 0.34rem;
   border: 1px solid var(--ink);
   background: rgb(255 255 255 / 72%);
-  font-size: 0.68rem;
+  font-size: var(--text-meta);
   font-weight: 750;
   letter-spacing: 0.15em;
   line-height: 1;
@@ -131,15 +151,15 @@ a {
 
 .hero__title {
   font-size: clamp(3rem, 8vw, 5.75rem);
-  font-weight: 780;
-  letter-spacing: -0.055em;
+  font-weight: 750;
+  letter-spacing: -0.025em;
   line-height: 0.94;
 }
 
 .hero__subtitle {
   margin-top: 0.8rem;
   color: #596171;
-  font-size: clamp(0.8rem, 1.5vw, 0.95rem);
+  font-size: var(--text-secondary);
   line-height: 1.5;
 }
 
@@ -158,7 +178,7 @@ a {
   margin-top: 2.25rem;
   padding: 0.75rem 0 0.55rem;
   border-bottom: 2px solid var(--ink);
-  font-size: 0.8rem;
+  font-size: var(--text-secondary);
   font-weight: 700;
 }
 
@@ -173,7 +193,7 @@ a {
   right: clamp(1.25rem, 4vw, 4.5rem);
   bottom: 1.5rem;
   color: var(--muted);
-  font-size: 0.65rem;
+  font-size: var(--text-meta);
   font-weight: 700;
   letter-spacing: 0.12em;
 }
@@ -186,7 +206,7 @@ a {
 .features__inner {
   width: min(100%, 84rem);
   margin: 0 auto;
-  padding: clamp(5rem, 12vw, 10rem) clamp(1.25rem, 5vw, 5rem) 3rem;
+  padding: clamp(5rem, 12vw, 10rem) min(5vw, 5rem) 3rem;
 }
 
 .features__header {
@@ -200,7 +220,7 @@ a {
 .section-label {
   margin: 0 0 1.25rem;
   color: #626870;
-  font-size: 0.67rem;
+  font-size: var(--text-meta);
   font-weight: 750;
   letter-spacing: 0.15em;
   line-height: 1.4;
@@ -212,18 +232,18 @@ a {
 
 .features__header h2 {
   margin: 0;
-  font-size: clamp(2.35rem, 5vw, 4.8rem);
-  font-weight: 730;
-  letter-spacing: -0.055em;
-  line-height: 1.1;
+  font-size: min(clamp(2.35rem, 5vw, 4.8rem), 19vw);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.16;
 }
 
 .features__header > p:last-child {
-  max-width: 31rem;
+  max-width: 30ic;
   margin: 0 0 0.25rem;
   color: var(--muted);
-  font-size: clamp(0.95rem, 1.25vw, 1.05rem);
-  line-height: 1.9;
+  font-size: 1rem;
+  line-height: 1.85;
 }
 
 .feature-journey {
@@ -250,7 +270,7 @@ a {
   height: 2.45rem;
   place-items: center;
   background: var(--accent);
-  font-size: 0.72rem;
+  font-size: var(--text-label);
   font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
@@ -258,25 +278,25 @@ a {
 .feature-phase__header p {
   margin: 0 0 1rem;
   color: var(--muted);
-  font-size: 0.67rem;
+  font-size: var(--text-meta);
   font-weight: 750;
   letter-spacing: 0.14em;
 }
 
 .feature-phase__header h3 {
   margin: 0;
-  font-size: clamp(1.55rem, 2.5vw, 2.35rem);
+  font-size: min(clamp(1.55rem, 2.5vw, 2.35rem), 14vw);
   font-weight: 700;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.02em;
   line-height: 1.35;
 }
 
 .feature-phase__header span {
   display: block;
-  max-width: 26rem;
+  max-width: 26ic;
   margin-top: 1.5rem;
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 1rem;
   line-height: 1.85;
 }
 
@@ -303,7 +323,7 @@ a {
   border-right: 1px solid var(--line);
   color: #737982;
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
-  font-size: 0.75rem;
+  font-size: var(--text-label);
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
@@ -313,19 +333,19 @@ a {
 }
 
 .feature-item h4 {
-  max-width: 32rem;
+  max-width: 26ic;
   margin: 0;
-  font-size: clamp(1.35rem, 2.2vw, 2rem);
-  font-weight: 680;
-  letter-spacing: -0.035em;
+  font-size: min(clamp(1.25rem, 2vw, 1.85rem), 11vw);
+  font-weight: 650;
+  letter-spacing: -0.015em;
   line-height: 1.4;
 }
 
 .feature-item p {
-  max-width: 38rem;
+  max-width: 38ic;
   margin: 1rem 0 0;
   color: var(--muted);
-  font-size: 0.92rem;
+  font-size: 1rem;
   line-height: 1.85;
 }
 
@@ -342,7 +362,7 @@ a {
 .feature-item ul li {
   position: relative;
   color: #3f444c;
-  font-size: 0.7rem;
+  font-size: var(--text-label);
   font-weight: 650;
   letter-spacing: 0.04em;
 }
@@ -368,21 +388,21 @@ a {
 .features__footer p {
   margin: 0;
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: var(--text-secondary);
   line-height: 1.7;
 }
 
 .features__footer .section-label {
   margin-bottom: 0.45rem;
   color: #555b64;
-  font-size: 0.62rem;
+  font-size: var(--text-meta);
 }
 
 .features__footer a {
   display: inline-flex;
   align-items: center;
   gap: 0.75rem;
-  font-size: 0.78rem;
+  font-size: var(--text-label);
   font-weight: 750;
   white-space: nowrap;
 }
@@ -426,8 +446,8 @@ a {
 
 @media (max-width: 520px) {
   .hero {
-    padding-right: 1.25rem;
-    padding-left: 1.25rem;
+    padding-right: min(1.25rem, 6vw);
+    padding-left: min(1.25rem, 6vw);
   }
 
   .hero__platform {
@@ -435,15 +455,19 @@ a {
   }
 
   .features__inner {
-    padding-right: 1.1rem;
-    padding-left: 1.1rem;
+    padding-right: min(1.1rem, 5.5vw);
+    padding-left: min(1.1rem, 5.5vw);
   }
 
   .feature-phase__header {
-    grid-template-columns: 2.6rem 1fr;
-    gap: 0.9rem;
+    grid-template-columns: min(2.6rem, 10vw) minmax(0, 1fr);
+    gap: min(0.9rem, 3vw);
     padding-top: 2.75rem;
     padding-bottom: 2.75rem;
+  }
+
+  .feature-phase__header > div:last-child {
+    min-width: 0;
   }
 
   .feature-phase__index {
@@ -452,7 +476,7 @@ a {
   }
 
   .feature-item {
-    grid-template-columns: 3rem 1fr;
+    grid-template-columns: min(3rem, 12vw) minmax(0, 1fr);
     min-height: 0;
   }
 
@@ -461,7 +485,7 @@ a {
   }
 
   .feature-item__copy {
-    padding: 1.9rem 1.15rem 2.1rem;
+    padding: 1.9rem min(1.15rem, 4vw) 2.1rem;
   }
 
   .feature-item ul {

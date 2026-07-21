@@ -1,41 +1,103 @@
 ---
 import ConventionFloorBackdrop from "../components/ConventionFloorBackdrop.astro";
 import Layout from "../layouts/Layout.astro";
+import Phrase from "../components/Phrase.astro";
 
 const featureGroups = [
   {
     id: "prepare",
     label: "BEFORE YOU GO",
-    title: "行く前に、ちゃんと調べる。",
-    description:
-      "カタログを眺めるところから、気になるサークルを調べて、当日の行き先を決めるところまで。予習の時間そのものを、もっと楽しくします。",
+    title: ["行く前に、", "ちゃんと", "調べる。"],
+    description: [
+      "カタログを",
+      "眺める",
+      "ところから、",
+      "気になる",
+      "サークルを",
+      "調べて、",
+      "当日の",
+      "行き先を",
+      "決める",
+      "ところまで。",
+      "予習の時間",
+      "そのものを、",
+      "もっと楽しく",
+      "します。",
+    ],
     features: [
       {
         number: "01",
-        title: "カタログをめくって、出会う。",
-        description:
-          "サークルカットをギャラリーで一覧。知らなかった作品や作家にも、眺めながら自然に出会えます。",
+        title: ["カタログを", "めくって、", "出会う。"],
+        description: [
+          "サークル",
+          "カットを",
+          "ギャラリーで",
+          "一覧。",
+          "知らなかった",
+          "作品や",
+          "作家にも、",
+          "眺めながら",
+          "自然に",
+          "出会えます。",
+        ],
         details: ["カット一覧", "ブロック別", "iPhone / iPad"],
       },
       {
         number: "02",
-        title: "気になるサークルを、深く知る。",
-        description:
-          "サークル名、作家名、紹介文、SNSまでひと続きに確認。会場へ行く前に、頒布内容や活動をじっくり調べられます。",
+        title: ["気になる", "サークルを、", "深く知る。"],
+        description: [
+          "サークル名、",
+          "作家名、",
+          "紹介文、",
+          "SNSまで",
+          "ひと続きに",
+          "確認。",
+          "会場へ",
+          "行く前に、",
+          "頒布内容や",
+          "活動を",
+          "じっくり",
+          "調べられます。",
+        ],
         details: ["サークル詳細", "作家・紹介文", "SNS"],
       },
       {
         number: "03",
-        title: "覚えている言葉から、探し出す。",
-        description:
-          "サークル名が曖昧でも大丈夫。サークル、作家、紹介文を横断して検索し、候補を地図上ですぐ見つけます。",
+        title: ["覚えている", "言葉から、", "探し出す。"],
+        description: [
+          "サークル名が",
+          "曖昧でも",
+          "大丈夫。",
+          "サークル、",
+          "作家、",
+          "紹介文を",
+          "横断して",
+          "検索し、",
+          "候補を",
+          "地図上で",
+          "すぐ",
+          "見つけます。",
+        ],
         details: ["横断検索", "地図へハイライト", "件数表示"],
       },
       {
         number: "04",
-        title: "行きたい理由ごと、残しておく。",
-        description:
-          "気になる場所を色分けして、メモと一緒に保存。Circle.msのお気に入りとも同期し、調べたことを当日までつなぎます。",
+        title: ["行きたい", "理由ごと、", "残しておく。"],
+        description: [
+          "気になる",
+          "場所を",
+          "色分けして、",
+          "メモと",
+          "一緒に保存。",
+          "Circle.msの",
+          "お気に入り",
+          "とも",
+          "同期し、",
+          "調べた",
+          "ことを",
+          "当日まで",
+          "つなぎます。",
+        ],
         details: ["色分け", "メモ", "Circle.ms 同期"],
       },
     ],
@@ -43,29 +105,75 @@ const featureGroups = [
   {
     id: "navigate",
     label: "AT THE VENUE",
-    title: "会場で、迷わずまわる。",
-    description:
-      "調べておいた行き先を、そのまま会場図へ。広いホールでも現在見ている場所と次の目的地を、すばやく把握できます。",
+    title: ["会場で、", "迷わず", "まわる。"],
+    description: [
+      "調べておいた",
+      "行き先を、",
+      "そのまま",
+      "会場図へ。",
+      "広いホールでも",
+      "現在見ている",
+      "場所と",
+      "次の目的地を、",
+      "すばやく",
+      "把握できます。",
+    ],
     features: [
       {
         number: "05",
-        title: "会場全体を、自分の手で見渡す。",
-        description:
-          "開催回・日程・ホールを切り替えながら、会場図をパン、ズーム、回転。テーブル単位まで滑らかに確認できます。",
+        title: ["会場全体を、", "自分の手で", "見渡す。"],
+        description: [
+          "開催回・",
+          "日程・ホールを",
+          "切り替え",
+          "ながら、",
+          "会場図を",
+          "パン、ズーム、",
+          "回転。",
+          "テーブル",
+          "単位まで",
+          "滑らかに",
+          "確認できます。",
+        ],
         details: ["パン・ズーム・回転", "日程切り替え", "ホール切り替え"],
       },
       {
         number: "06",
-        title: "ジャンルの広がりを、地図に重ねる。",
-        description:
-          "ジャンル配置を会場図の上に表示。目的のエリアだけでなく、その周辺にある新しい出会いも見つけやすくします。",
+        title: ["ジャンルの", "広がりを、", "地図に", "重ねる。"],
+        description: [
+          "ジャンル",
+          "配置を",
+          "会場図の上に",
+          "表示。",
+          "目的のエリア",
+          "だけでなく、",
+          "その周辺に",
+          "ある",
+          "新しい",
+          "出会いも",
+          "見つけやすく",
+          "します。",
+        ],
         details: ["ジャンルレイヤー", "配置の俯瞰", "表示切り替え"],
       },
       {
         number: "07",
-        title: "寄り道の少ない順番を、組み立てる。",
-        description:
-          "保存したサークルを地図上で結び、近い場所から巡る流れを自動で整理。予習したリストを、歩けるルートに変えます。",
+        title: ["寄り道の", "少ない", "順番を、", "組み立てる。"],
+        description: [
+          "保存した",
+          "サークルを",
+          "地図上で",
+          "結び、",
+          "近い場所から",
+          "巡る流れを",
+          "自動で",
+          "整理。",
+          "予習した",
+          "リストを、",
+          "歩ける",
+          "ルートに",
+          "変えます。",
+        ],
         details: ["ルート自動整理", "訪問順", "保存先を地図表示"],
       },
     ],
@@ -89,10 +197,22 @@ const featureGroups = [
 
       <div class="hero__content">
         <p class="hero__status">絶賛開発中</p>
-        <h1 class="hero__title" id="hero-title">コミナビ</h1>
-        <p class="hero__subtitle">コミケ非公式ナビゲーションアプリ</p>
-        <p class="hero__statement">
-          調べるところから、<br />迷わず会えるところまで。
+        <h1 class="hero__title cjk-phrase" id="hero-title">
+          <Phrase segments={["コミ", "ナビ"]} />
+        </h1>
+        <p class="hero__subtitle cjk-phrase">
+          <Phrase segments={["コミケ非公式", "ナビゲーション", "アプリ"]} />
+        </p>
+        <p class="hero__statement cjk-phrase">
+          <Phrase
+            segments={[
+              "調べる",
+              "ところから、",
+              "迷わず",
+              "会える",
+              "ところまで。",
+            ]}
+          />
         </p>
         <a class="hero__cta" href="#features">
           機能を見る
@@ -107,11 +227,35 @@ const featureGroups = [
       <div class="features__inner">
         <header class="features__header">
           <p class="section-label">WHAT COMINAVI DOES / 07</p>
-          <h2 id="features-title">
-            当日のための予習も、<br />会場でのナビも。
+          <h2 class="cjk-phrase" id="features-title">
+            <Phrase
+              segments={[
+                "当日の",
+                "ための",
+                "予習も、",
+                "会場での",
+                "ナビも。",
+              ]}
+            />
           </h2>
-          <p>
-            コミナビは、カタログを「見る」だけで終わらせません。見つけて、調べて、残して、実際に会いに行くまでを一つにつなげます。
+          <p class="cjk-phrase">
+            <Phrase
+              segments={[
+                "コミナビは、",
+                "カタログを",
+                "「見る」だけで",
+                "終わらせ",
+                "ません。",
+                "見つけて、",
+                "調べて、",
+                "残して、",
+                "実際に",
+                "会いに行く",
+                "までを",
+                "一つに",
+                "つなげます。",
+              ]}
+            />
           </p>
         </header>
 
@@ -128,8 +272,12 @@ const featureGroups = [
                   </div>
                   <div>
                     <p>{group.label}</p>
-                    <h3 id={`phase-${group.id}`}>{group.title}</h3>
-                    <span>{group.description}</span>
+                    <h3 class="cjk-phrase" id={`phase-${group.id}`}>
+                      <Phrase segments={group.title} />
+                    </h3>
+                    <span class="cjk-phrase">
+                      <Phrase segments={group.description} />
+                    </span>
                   </div>
                 </header>
 
@@ -140,9 +288,13 @@ const featureGroups = [
                         {feature.number}
                       </div>
                       <div class="feature-item__copy">
-                        <h4>{feature.title}</h4>
-                        <p>{feature.description}</p>
-                        <ul aria-label={`${feature.title}の要点`}>
+                        <h4 class="cjk-phrase">
+                          <Phrase segments={feature.title} />
+                        </h4>
+                        <p class="cjk-phrase">
+                          <Phrase segments={feature.description} />
+                        </p>
+                        <ul aria-label={`${feature.title.join("")}の要点`}>
                           {feature.details.map((detail) => (
                             <li>{detail}</li>
                           ))}
@@ -159,7 +311,15 @@ const featureGroups = [
         <footer class="features__footer">
           <div>
             <p class="section-label">STILL IN DEVELOPMENT</p>
-            <p>掲載している機能や画面は、現在開発中です。</p>
+            <p class="cjk-phrase">
+              <Phrase
+                segments={[
+                  "掲載している",
+                  "機能や画面は、",
+                  "現在開発中です。",
+                ]}
+              />
+            </p>
           </div>
           <a href="https://github.com/cominavi" rel="noreferrer">
             GitHub で開発を見る

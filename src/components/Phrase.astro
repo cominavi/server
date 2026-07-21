@@ -1,0 +1,16 @@
+---
+interface Props {
+  segments: string[];
+}
+
+const { segments } = Astro.props;
+---
+
+{
+  segments.map((segment, index) => (
+    <>
+      {index > 0 && <wbr />}
+      {segment}
+    </>
+  ))
+}
