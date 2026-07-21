@@ -3,24 +3,25 @@
   "type": "module",
   "version": "0.0.1",
   "scripts": {
-    "dev": "astro dev",
-    "start": "astro dev",
-    "build": "astro check && astro build",
+    "typegen": "wrangler types",
+    "dev": "pnpm typegen && astro dev",
+    "start": "pnpm dev",
+    "build": "pnpm typegen && astro check && astro build",
+    "deploy": "pnpm build && wrangler deploy",
     "preview": "astro preview",
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/check": "^0.9.4",
-    "@astrojs/cloudflare": "^11.1.0",
-    "astro": "^4.16.2",
-    "typescript": "^5.6.3"
+    "@astrojs/cloudflare": "^14.1.4",
+    "astro": "^7.1.3"
   },
-  "packageManager": "yarn@4.4.1",
+  "packageManager": "pnpm@11.9.0",
   "devDependencies": {
-    "@julr/unocss-preset-heropatterns": "^1.0.2",
-    "@unocss/reset": "^0.63.4",
-    "prettier": "^3.3.3",
+    "@astrojs/check": "^0.9.9",
+    "@cloudflare/workers-types": "^5.20260721.1",
+    "prettier": "^3.9.6",
     "prettier-plugin-astro": "^0.14.1",
-    "unocss": "^0.63.4"
+    "typescript": "^6.0.3",
+    "wrangler": "^4.112.0"
   }
 }

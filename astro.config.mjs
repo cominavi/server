@@ -1,18 +1,14 @@
 // @ts-check
 import cloudflare from "@astrojs/cloudflare";
 import { defineConfig } from "astro/config";
-import UnoCSS from "unocss/astro";
 
 // https://astro.build/config
 export default defineConfig({
+  site: "https://cominavi.net",
   build: {
     redirects: false,
   },
-  output: "hybrid",
-  adapter: cloudflare(),
-  integrations: [
-    UnoCSS({
-      injectReset: true,
-    }),
-  ],
+  adapter: cloudflare({
+    imageService: "compile",
+  }),
 });

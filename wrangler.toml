@@ -1,5 +1,0 @@
-name = "cominavi-homepage"
-pages_build_output_dir = "dist"
-
-[vars]
-COMINAVI_CIRCLEMS_ORIGIN = "https://auth1.circle.ms"

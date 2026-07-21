@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cominavi-homepage",
+  "account_id": "bee683f3b5473a422feaa41e040ac176",
+  "main": "@astrojs/cloudflare/entrypoints/server",
+  "compatibility_date": "2026-07-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    {
+      "pattern": "cominavi.net",
+      "custom_domain": true,
+    },
+  ],
+  "vars": {
+    "COMINAVI_OAUTH_CIRCLEMS_PRODUCTION_ORIGIN": "https://auth1.circle.ms",
+    "COMINAVI_OAUTH_CIRCLEMS_SANDBOX_ORIGIN": "https://auth1-sandbox.circle.ms",
+  },
+}

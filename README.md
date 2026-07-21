@@ -1,47 +1,46 @@
-# Astro Starter Kit: Minimal
+# Cominavi Homepage
+
+The public website and Circle.ms OAuth endpoints for Cominavi, built with Astro and deployed as a Cloudflare Worker at [cominavi.net](https://cominavi.net).
+
+## Setup
+
+The project uses the Node.js version in `.node-version` and pnpm through Corepack.
 
 ```sh
-npm create astro@latest -- --template minimal
+corepack enable
+pnpm install --frozen-lockfile
 ```
 
-[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/withastro/astro/tree/latest/examples/minimal)
-[![Open with CodeSandbox](https://assets.codesandbox.io/github/button-edit-lime.svg)](https://codesandbox.io/p/sandbox/github/withastro/astro/tree/latest/examples/minimal)
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/withastro/astro?devcontainer_path=.devcontainer/minimal/devcontainer.json)
+For local OAuth development, create `.dev.vars` with:
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
-
-## 🚀 Project Structure
-
-Inside of your Astro project, you'll see the following folders and files:
-
-```text
-/
-├── public/
-├── src/
-│   └── pages/
-│       └── index.astro
-└── package.json
+```dotenv
+COMINAVI_OAUTH_CIRCLEMS_PRODUCTION_CLIENT_ID=...
+COMINAVI_OAUTH_CIRCLEMS_PRODUCTION_CLIENT_SECRET=...
+COMINAVI_OAUTH_CIRCLEMS_SANDBOX_CLIENT_ID=...
+COMINAVI_OAUTH_CIRCLEMS_SANDBOX_CLIENT_SECRET=...
 ```
 
-Astro looks for `.astro` or `.md` files in the `src/pages/` directory. Each page is exposed as a route based on its file name.
+## Commands
 
-There's nothing special about `src/components/`, but that's where we like to put any Astro/React/Vue/Svelte/Preact components.
+| Command        | Action                                             |
+| :------------- | :------------------------------------------------- |
+| `pnpm dev`     | Generate Worker types and start Astro locally      |
+| `pnpm typegen` | Regenerate Cloudflare Worker types                 |
+| `pnpm build`   | Type-check and create the production Worker bundle |
+| `pnpm preview` | Preview the production build locally               |
+| `pnpm deploy`  | Build and deploy to Cloudflare Workers             |
 
-Any static assets, like images, can be placed in the `public/` directory.
+## Deployment
 
-## 🧞 Commands
+Wrangler is pinned to the GalvinGao Cloudflare account and the `cominavi.net` custom domain in `wrangler.jsonc`. Production and sandbox use the same Worker routes. Token exchanges try production first and sandbox second, using separate origins and credentials for each attempt.
 
-All commands are run from the root of the project, from a terminal:
+Configure all four OAuth secrets:
 
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
+```sh
+pnpm exec wrangler secret put COMINAVI_OAUTH_CIRCLEMS_PRODUCTION_CLIENT_ID
+pnpm exec wrangler secret put COMINAVI_OAUTH_CIRCLEMS_PRODUCTION_CLIENT_SECRET
+pnpm exec wrangler secret put COMINAVI_OAUTH_CIRCLEMS_SANDBOX_CLIENT_ID
+pnpm exec wrangler secret put COMINAVI_OAUTH_CIRCLEMS_SANDBOX_CLIENT_SECRET
+```
 
-## 👀 Want to learn more?
-
-Feel free to check [our documentation](https://docs.astro.build) or jump into our [Discord server](https://astro.build/chat).
+The Astro Cloudflare adapter automatically provisions its `SESSION` KV namespace during deployment.

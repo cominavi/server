@@ -1,15 +1,16 @@
 /// <reference path="../.astro/types.d.ts" />
 
-type Runtime = import("@astrojs/cloudflare").Runtime<Env>;
+interface CominaviWorkerEnv {
+  COMINAVI_OAUTH_CIRCLEMS_PRODUCTION_ORIGIN: string;
+  COMINAVI_OAUTH_CIRCLEMS_PRODUCTION_CLIENT_ID: string;
+  COMINAVI_OAUTH_CIRCLEMS_PRODUCTION_CLIENT_SECRET: string;
+  COMINAVI_OAUTH_CIRCLEMS_SANDBOX_ORIGIN: string;
+  COMINAVI_OAUTH_CIRCLEMS_SANDBOX_CLIENT_ID: string;
+  COMINAVI_OAUTH_CIRCLEMS_SANDBOX_CLIENT_SECRET: string;
+}
 
-declare namespace App {
-  interface Locals extends Runtime {
-    runtime: {
-      env: {
-        COMINAVI_CIRCLEMS_ORIGIN: string;
-        COMINAVI_OAUTH_CIRCLEMS_CLIENT_ID: string;
-        COMINAVI_OAUTH_CIRCLEMS_CLIENT_SECRET: string;
-      };
-    };
-  }
+interface Env extends CominaviWorkerEnv {}
+
+declare namespace Cloudflare {
+  interface Env extends CominaviWorkerEnv {}
 }
