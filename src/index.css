@@ -416,6 +416,14 @@ h4.cjk-phrase,
   white-space: nowrap;
 }
 
+.features__footer-links {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 1rem 1.5rem;
+}
+
 @keyframes fade-in {
   from {
     opacity: 0;
@@ -506,6 +514,11 @@ h4.cjk-phrase,
   }
 
   .features__footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .features__footer-links {
     align-items: flex-start;
     flex-direction: column;
   }

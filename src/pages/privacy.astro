@@ -1,0 +1,341 @@
+---
+import Layout from "../layouts/Layout.astro";
+
+const updatedAt = "2026-07-29";
+---
+
+<Layout
+  title="プライバシーポリシー | コミナビ"
+  description="コミナビが取り扱う情報、利用目的、外部サービス、保存と削除について説明します。"
+>
+  <main class="privacy">
+    <header class="privacy__nav">
+      <a class="wordmark" href="/">COMINAVI</a>
+      <a href="#english">English</a>
+    </header>
+
+    <article class="privacy__document">
+      <header class="privacy__hero">
+        <p class="privacy__eyebrow">PRIVACY / プライバシー</p>
+        <h1>プライバシーポリシー</h1>
+        <p>
+          コミナビを安心して使っていただくため、取り扱う情報とその目的を説明します。
+        </p>
+        <dl>
+          <div>
+            <dt>運営者</dt>
+            <dd>MikuNet LLC</dd>
+          </div>
+          <div>
+            <dt>最終更新</dt>
+            <dd><time datetime={updatedAt}>2026年7月29日</time></dd>
+          </div>
+        </dl>
+      </header>
+
+      <div class="privacy__sections" lang="ja">
+        <section>
+          <p class="privacy__number">01</p>
+          <div>
+            <h2>取り扱う情報</h2>
+            <p>
+              Circle.msでログインすると、ユーザーID、表示名、R18表示設定、OAuthのアクセストークンおよびリフレッシュトークンを取り扱います。トークンは端末のKeychainに保存します。
+            </p>
+            <p>
+              カタログ、画像、保存したサークル、巡回順、メモ、表示設定などは、原則として端末内に保存します。Circle.msとの同期機能を使う場合は、対象の情報をCircle.msへ送受信します。
+            </p>
+          </div>
+        </section>
+
+        <section>
+          <p class="privacy__number">02</p>
+          <div>
+            <h2>位置情報と方位</h2>
+            <p>
+              位置情報は任意です。「現在地を設定」を開いている間、近くの会場候補と向きを表示するために使います。コミナビは位置情報と方位を端末内で処理し、保存または運営者のサーバーへ送信しません。許可しなくても会場を手動で選べます。
+            </p>
+          </div>
+        </section>
+
+        <section>
+          <p class="privacy__number">03</p>
+          <div>
+            <h2>品質改善と診断</h2>
+            <p>
+              不具合の調査、性能改善、機能の利用状況の把握にSentryとPostHogを使用します。これらのサービスには、アプリや端末の情報、操作イベント、クラッシュおよび性能情報が送信される場合があります。
+            </p>
+            <p>
+              ログイン後は、Circle.msのユーザーID、表示名、R18表示設定を診断・分析情報に関連付ける場合があります。広告配信のための追跡は行わず、個人情報を販売しません。
+            </p>
+          </div>
+        </section>
+
+        <section>
+          <p class="privacy__number">04</p>
+          <div>
+            <h2>外部サービスと通信</h2>
+            <p>
+              認証とカタログ取得にはCircle.ms、トークン更新にはcominavi.net、診断と分析にはSentryとPostHog、地図表示にはOpenStreetMap、OpenMapTiles、Americana
+              Mapなどの提供元を利用します。通信時には、各提供元がIPアドレスや一般的なリクエスト情報を受け取る場合があります。
+            </p>
+          </div>
+        </section>
+
+        <section>
+          <p class="privacy__number">05</p>
+          <div>
+            <h2>保存、削除、問い合わせ</h2>
+            <p>
+              ログアウトすると端末内のCircle.msセッションを削除します。アプリを削除すると、端末内のカタログ、キャッシュ、設定、保存内容も削除されます。外部サービス上の診断・分析情報は各サービスの方針に従って保持されます。
+            </p>
+            <p>
+              本ポリシーやデータの取り扱いに関するお問い合わせは、
+              <a href="mailto:hello@mikunet.llc">hello@mikunet.llc</a>
+              までご連絡ください。
+            </p>
+          </div>
+        </section>
+      </div>
+
+      <div class="privacy__english" id="english" lang="en">
+        <header>
+          <p class="privacy__eyebrow">ENGLISH</p>
+          <h2>Privacy Policy</h2>
+          <p>Last updated July 29, 2026 · Operator: MikuNet LLC</p>
+        </header>
+
+        <section>
+          <h3>Information we process</h3>
+          <p>
+            When you sign in with Circle.ms, ComiNavi processes your Circle.ms
+            user ID, display name, R18 display preference, OAuth access token,
+            and refresh token. Tokens are stored in the device Keychain.
+            Catalogs, images, saved circles, route order, notes, and settings
+            are generally stored on your device. Information selected for
+            Circle.ms synchronization is exchanged with Circle.ms.
+          </p>
+        </section>
+
+        <section>
+          <h3>Location and heading</h3>
+          <p>
+            Location access is optional and is used while Where Am I is open to
+            suggest nearby venue areas and show your heading. ComiNavi processes
+            location and heading on device and does not retain them or send them
+            to the operator’s servers. You can always choose a venue manually.
+          </p>
+        </section>
+
+        <section>
+          <h3>Diagnostics and analytics</h3>
+          <p>
+            ComiNavi uses Sentry and PostHog to investigate errors, improve
+            performance, and understand feature usage. App and device
+            information, usage events, crash data, and performance data may be
+            sent to these services. After sign-in, your Circle.ms user ID,
+            display name, and R18 display preference may be associated with
+            diagnostic and analytics data. We do not use this data for
+            advertising tracking and do not sell personal information.
+          </p>
+        </section>
+
+        <section>
+          <h3>Service providers, retention, and deletion</h3>
+          <p>
+            ComiNavi uses Circle.ms for authentication and catalogs,
+            cominavi.net for token refresh, Sentry and PostHog for diagnostics
+            and analytics, and providers including OpenStreetMap, OpenMapTiles,
+            and Americana Map for map content. These providers may receive IP
+            addresses and standard request information.
+          </p>
+          <p>
+            Signing out removes the Circle.ms session stored by ComiNavi.
+            Deleting the app removes its local catalogs, caches, settings, and
+            saved content. Diagnostic and analytics records are retained under
+            each provider’s policy.
+          </p>
+        </section>
+
+        <section>
+          <h3>Contact</h3>
+          <p>
+            Questions or data requests can be sent to
+            <a href="mailto:hello@mikunet.llc">hello@mikunet.llc</a>.
+          </p>
+        </section>
+      </div>
+    </article>
+  </main>
+
+  <style>
+    .privacy {
+      min-height: 100svh;
+      background: var(--paper);
+    }
+
+    .privacy__nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: min(100%, 84rem);
+      margin: 0 auto;
+      padding: 1.5rem min(5vw, 5rem);
+      font-size: var(--text-label);
+      font-weight: 750;
+      letter-spacing: 0.08em;
+    }
+
+    .privacy__nav a {
+      text-underline-offset: 0.28em;
+    }
+
+    .privacy__nav a:hover {
+      text-decoration: underline;
+    }
+
+    .privacy__document {
+      width: min(100%, 72rem);
+      margin: 0 auto;
+      padding: clamp(3rem, 9vw, 7rem) min(5vw, 5rem) 5rem;
+    }
+
+    .privacy__hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.6fr) minmax(16rem, 0.65fr);
+      gap: 1rem clamp(3rem, 8vw, 8rem);
+      align-items: end;
+      padding-bottom: clamp(3.5rem, 8vw, 6.5rem);
+    }
+
+    .privacy__eyebrow {
+      grid-column: 1 / -1;
+      margin: 0;
+      color: var(--muted);
+      font-size: var(--text-meta);
+      font-weight: 750;
+      letter-spacing: 0.16em;
+    }
+
+    .privacy__hero h1,
+    .privacy__english h2 {
+      margin: 0;
+      font-size: clamp(2.35rem, 6vw, 4.8rem);
+      letter-spacing: -0.03em;
+      line-height: 1.12;
+    }
+
+    .privacy__hero > p:not(.privacy__eyebrow) {
+      max-width: 29ic;
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.85;
+    }
+
+    .privacy__hero dl {
+      display: flex;
+      grid-column: 1 / -1;
+      flex-wrap: wrap;
+      gap: 0.75rem 2rem;
+      margin: 2rem 0 0;
+      padding-top: 1.25rem;
+      border-top: 1px solid var(--line);
+    }
+
+    .privacy__hero dl div {
+      display: flex;
+      gap: 0.75rem;
+    }
+
+    .privacy__hero dt {
+      color: var(--muted);
+    }
+
+    .privacy__hero dd {
+      margin: 0;
+      font-weight: 650;
+    }
+
+    .privacy__sections {
+      border-top: 1px solid var(--ink);
+    }
+
+    .privacy__sections > section {
+      display: grid;
+      grid-template-columns: 4rem minmax(0, 1fr);
+      gap: clamp(1rem, 3vw, 2.5rem);
+      padding: clamp(2rem, 5vw, 3.75rem) 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .privacy__number {
+      margin: 0;
+      color: #747a83;
+      font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+      font-size: var(--text-label);
+    }
+
+    .privacy__sections h2,
+    .privacy__english h3 {
+      margin: 0 0 1rem;
+      font-size: clamp(1.25rem, 2.4vw, 1.7rem);
+      line-height: 1.4;
+    }
+
+    .privacy__sections section p:not(.privacy__number),
+    .privacy__english section p {
+      max-width: 48rem;
+      margin: 0.8rem 0 0;
+      color: var(--muted);
+      line-height: 1.9;
+    }
+
+    .privacy__sections a,
+    .privacy__english a {
+      color: #587900;
+      font-weight: 650;
+      text-decoration: underline;
+      text-underline-offset: 0.22em;
+    }
+
+    .privacy__english {
+      margin-top: clamp(5rem, 12vw, 9rem);
+      padding-top: clamp(3rem, 7vw, 5rem);
+      border-top: 3px solid var(--accent);
+    }
+
+    .privacy__english header {
+      margin-bottom: 3rem;
+    }
+
+    .privacy__english header > p:last-child {
+      color: var(--muted);
+    }
+
+    .privacy__english section {
+      padding: 2rem 0;
+      border-top: 1px solid var(--line);
+    }
+
+    @media (max-width: 700px) {
+      .privacy__hero {
+        display: block;
+      }
+
+      .privacy__eyebrow {
+        margin-bottom: 1.25rem;
+      }
+
+      .privacy__hero > p:not(.privacy__eyebrow) {
+        margin-top: 1.5rem;
+      }
+
+      .privacy__hero dl {
+        margin-top: 2rem;
+      }
+
+      .privacy__sections > section {
+        grid-template-columns: 2.5rem minmax(0, 1fr);
+      }
+    }
+  </style>
+</Layout>
