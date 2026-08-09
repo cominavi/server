@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "cominavi-homepage",
   "account_id": "bee683f3b5473a422feaa41e040ac176",
-  "main": "@astrojs/cloudflare/entrypoints/server",
+  "main": "src/worker.ts",
   "compatibility_date": "2026-07-14",
   "compatibility_flags": ["nodejs_compat"],
   "routes": [
@@ -14,5 +14,48 @@
   "vars": {
     "COMINAVI_OAUTH_CIRCLEMS_PRODUCTION_ORIGIN": "https://auth1.circle.ms",
     "COMINAVI_OAUTH_CIRCLEMS_SANDBOX_ORIGIN": "https://auth1-sandbox.circle.ms",
+    "COMINAVI_CIRCLEMS_PRODUCTION_API_ORIGIN": "https://api1.circle.ms",
+    "COMINAVI_CIRCLEMS_SANDBOX_API_ORIGIN": "https://api1-sandbox.circle.ms",
+    "COMINAVI_APNS_BUNDLE_IDS": "llc.mikunet.cominavi,llc.mikunet.cominavi.staging,llc.mikunet.cominavi.debug",
+  },
+  "d1_databases": [
+    {
+      "binding": "COMINAVI_DB",
+      "database_name": "cominavi",
+      "database_id": "2535a9bb-18fc-4bc9-8363-e4237ed68cee",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "SESSION",
+      "id": "0cba61477c1d46abaa195a53ee5790bf",
+    },
+    {
+      "binding": "COMINAVI_FOLLOWING_SNAPSHOTS",
+      "id": "141bd302f8ac40fabc98b6a9257685ae",
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "COMINAVI_PUSH_QUEUE",
+        "queue": "cominavi-push",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "cominavi-push",
+        "max_batch_size": 20,
+        "max_batch_timeout": 5,
+        "max_retries": 8,
+        "retry_delay": 15,
+        "dead_letter_queue": "cominavi-push-dlq",
+        "max_concurrency": 5,
+      },
+    ],
+  },
+  "triggers": {
+    "crons": ["*/2 * * * *"],
   },
 }

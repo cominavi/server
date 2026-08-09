@@ -1,7 +1,7 @@
 ---
 import Layout from "../layouts/Layout.astro";
 
-const updatedAt = "2026-07-29";
+const updatedAt = "2026-08-09";
 ---
 
 <Layout
@@ -28,7 +28,7 @@ const updatedAt = "2026-07-29";
           </div>
           <div>
             <dt>最終更新</dt>
-            <dd><time datetime={updatedAt}>2026年7月29日</time></dd>
+            <dd><time datetime={updatedAt}>2026年8月9日</time></dd>
           </div>
         </dl>
       </header>
@@ -42,7 +42,10 @@ const updatedAt = "2026-07-29";
               Circle.msでログインすると、ユーザーID、表示名、R18表示設定、OAuthのアクセストークンおよびリフレッシュトークンを取り扱います。トークンは端末のKeychainに保存します。
             </p>
             <p>
-              カタログ、画像、保存したサークル、巡回順、メモ、表示設定などは、原則として端末内に保存します。Circle.msとの同期機能を使う場合は、対象の情報をCircle.msへ送受信します。
+              カタログ、画像、保存したサークル、メモ、表示設定などは、原則として端末内に保存します。Circle.msとの同期機能を使う場合は、対象の情報をCircle.msへ送受信します。
+            </p>
+            <p>
+              お気に入りの更新通知またはXフォロー情報の取り込みを使う場合は、対象のサークル情報およびXアカウント情報を、ログイン中のユーザーIDと関連付けてcominavi.netで処理・保存します。
             </p>
           </div>
         </section>
@@ -75,8 +78,10 @@ const updatedAt = "2026-07-29";
           <div>
             <h2>外部サービスと通信</h2>
             <p>
-              認証とカタログ取得にはCircle.ms、トークン更新にはcominavi.net、診断と分析にはSentryとPostHog、地図表示にはOpenStreetMap、OpenMapTiles、Americana
-              Mapなどの提供元を利用します。通信時には、各提供元がIPアドレスや一般的なリクエスト情報を受け取る場合があります。
+              認証とカタログ取得にはCircle.ms、ユーザー認証・通知・取り込み機能にはcominavi.net、診断と分析にはSentryとPostHog、地図表示にはOpenStreetMap、OpenMapTiles、Americana
+              Mapなどの提供元を利用します。Xの公開情報の取得にはTwitterAPI.io、更新通知の配信にはApple
+              Push Notification
+              serviceを利用します。通信時には、各提供元がIPアドレスや一般的なリクエスト情報を受け取る場合があります。
             </p>
           </div>
         </section>
@@ -87,6 +92,9 @@ const updatedAt = "2026-07-29";
             <h2>保存、削除、問い合わせ</h2>
             <p>
               ログアウトすると端末内のCircle.msセッションを削除します。アプリを削除すると、端末内のカタログ、キャッシュ、設定、保存内容も削除されます。外部サービス上の診断・分析情報は各サービスの方針に従って保持されます。
+            </p>
+            <p>
+              cominavi.netに保存されたお気に入り、通知端末、取り込み結果などの削除を希望する場合は、下記の連絡先から請求できます。
             </p>
             <p>
               本ポリシーやデータの取り扱いに関するお問い合わせは、
@@ -101,7 +109,7 @@ const updatedAt = "2026-07-29";
         <header>
           <p class="privacy__eyebrow">ENGLISH</p>
           <h2>Privacy Policy</h2>
-          <p>Last updated July 29, 2026 · Operator: MikuNet LLC</p>
+          <p>Last updated August 9, 2026 · Operator: MikuNet LLC</p>
         </header>
 
         <section>
@@ -110,9 +118,14 @@ const updatedAt = "2026-07-29";
             When you sign in with Circle.ms, ComiNavi processes your Circle.ms
             user ID, display name, R18 display preference, OAuth access token,
             and refresh token. Tokens are stored in the device Keychain.
-            Catalogs, images, saved circles, route order, notes, and settings
-            are generally stored on your device. Information selected for
-            Circle.ms synchronization is exchanged with Circle.ms.
+            Catalogs, images, saved circles, notes, and settings are generally
+            stored on your device. Information selected for Circle.ms
+            synchronization is exchanged with Circle.ms.
+          </p>
+          <p>
+            If you use favorite-update notifications or X following import, the
+            relevant circle and X account information is processed and stored
+            by cominavi.net in association with your signed-in user ID.
           </p>
         </section>
 
@@ -143,16 +156,24 @@ const updatedAt = "2026-07-29";
           <h3>Service providers, retention, and deletion</h3>
           <p>
             ComiNavi uses Circle.ms for authentication and catalogs,
-            cominavi.net for token refresh, Sentry and PostHog for diagnostics
-            and analytics, and providers including OpenStreetMap, OpenMapTiles,
-            and Americana Map for map content. These providers may receive IP
-            addresses and standard request information.
+            cominavi.net for user authentication, notifications, and imports,
+            Sentry and PostHog for diagnostics and analytics, and
+            providers including OpenStreetMap, OpenMapTiles, and Americana Map
+            for map content. TwitterAPI.io retrieves public X post information,
+            and Apple Push Notification service delivers circle-update
+            notifications. These providers may receive IP addresses and standard
+            request information.
           </p>
           <p>
             Signing out removes the Circle.ms session stored by ComiNavi.
             Deleting the app removes its local catalogs, caches, settings, and
             saved content. Diagnostic and analytics records are retained under
             each provider’s policy.
+          </p>
+          <p>
+            You may contact us below to request deletion of favorites, push
+            devices, import results, and other records stored by
+            cominavi.net.
           </p>
         </section>
 

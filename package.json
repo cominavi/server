@@ -7,6 +7,9 @@
     "dev": "pnpm typegen && astro dev",
     "start": "pnpm dev",
     "build": "pnpm typegen && astro check && astro build",
+    "check": "astro check",
+    "test": "tsx --test tests/*.test.ts",
+    "seed:c108": "tsx tools/generate-realtime-seed.ts",
     "deploy": "pnpm build && wrangler deploy",
     "preview": "astro preview",
     "astro": "astro"
@@ -21,6 +24,7 @@
     "@cloudflare/workers-types": "^5.20260721.1",
     "prettier": "^3.9.6",
     "prettier-plugin-astro": "^0.14.1",
+    "tsx": "4.19.1",
     "typescript": "^6.0.3",
     "wrangler": "^4.112.0"
   }
