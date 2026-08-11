@@ -47,7 +47,7 @@
     "COMINAVI_APNS_BUNDLE_IDS": "llc.mikunet.cominavi,llc.mikunet.cominavi.staging,llc.mikunet.cominavi.debug",
     "COMINAVI_APPLE_CLIENT_IDS": "llc.mikunet.cominavi,llc.mikunet.cominavi.staging,llc.mikunet.cominavi.debug",
     "COMINAVI_APPLE_TEAM_ID": "F25GFFJL49",
-    "COMINAVI_APP_STORE_URL": "https://apps.apple.com/jp/search?term=ComiNavi",
+    "COMINAVI_TESTFLIGHT_URL": "https://testflight.apple.com/join/HrDC1xuC",
     "COMINAVI_SHARED_PLAN_MUTATIONS_ENABLED": "true",
   },
   "d1_databases": [

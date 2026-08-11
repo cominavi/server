@@ -44,7 +44,7 @@ optional compatibility destination.
 
 - The homepage describes an iPhone and iPad app that is still in development.
 - Public invitation routes must remain useful without the app and show plan and
-  Comiket context, privacy expectations, an App Store action, and an explicit
+  Comiket context, privacy expectations, a TestFlight action, and an explicit
   `cominavi://join/<token>` fallback.
 - Invitation links are reusable capabilities and never imply one fixed
   recipient before authentication.

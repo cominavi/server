@@ -330,6 +330,22 @@ test("join capabilities are never cached, referred, or indexed", () => {
   assert.match(source, /invitation\.expiresAt/);
   assert.match(source, /invitation\.inviter\.displayName/);
   assert.match(source, /invitation\.inviter\.avatarURL/);
+  assert.match(source, /class="invite-title__plan"/);
+  assert.match(source, /class="invite-title__action">に参加/);
+  assert.doesNotMatch(source, /「\{invitation\.planName\}」/);
+});
+
+test("join page sends beta testers to the current TestFlight build", () => {
+  const pageSource = readFileSync("src/pages/join/[token].astro", "utf8");
+  const wranglerSource = readFileSync("wrangler.jsonc", "utf8");
+  assert.match(pageSource, /env\.COMINAVI_TESTFLIGHT_URL/);
+  assert.match(pageSource, /TestFlight で試す/);
+  assert.match(pageSource, /TestFlight を開く/);
+  assert.doesNotMatch(pageSource, /App Store/);
+  assert.match(
+    wranglerSource,
+    /"COMINAVI_TESTFLIGHT_URL": "https:\/\/testflight\.apple\.com\/join\/HrDC1xuC"/,
+  );
 });
 
 test("provider auth fixture freezes parser-valid Circle, logout, and Apple request DTOs", () => {

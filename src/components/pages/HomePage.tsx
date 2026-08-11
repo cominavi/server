@@ -151,8 +151,11 @@ export default function HomePage() {
               <Phrase children={["コミケ非公式", "ナビゲーション", "アプリ"]} />
             </p>
             <p className="home-hero__lead">
-              見つける。残す。いっしょに計画する。そして、会場でたどり着く。
-              コミナビは、コミケの準備から当日までをひとつの道筋につなぎます。
+              見つける。残す。
+              <strong className="home-hero__live">
+                リアルタイムで、いっしょに計画する。
+              </strong>
+              そして、会場でたどり着く。コミナビは、コミケの準備から当日までをひとつの道筋につなぎます。
             </p>
             <div className="home-hero__actions">
               <a className="home-primary-action" href="#features">
@@ -188,8 +191,13 @@ export default function HomePage() {
                 <span>02</span>
                 <Icon name="users" />
                 <div>
-                  <strong>いっしょに計画する</strong>
-                  <p>行きたい場所と購入予定を、みんなのプランへ。</p>
+                  <strong>
+                    <span className="home-live-word">リアルタイム</span>
+                    で計画する
+                  </strong>
+                  <p>
+                    サークル、メモ、購入予定の変更を、みんなのプランへすぐに共有。
+                  </p>
                 </div>
               </li>
               <li>
@@ -267,10 +275,21 @@ export default function HomePage() {
         </svg>
         <Icon name="users" />
         <div className="home-shared__content">
-          <h2>ひとりの予定を、みんなのプランへ。</h2>
+          <h2>
+            <span className="cjk-phrase">
+              みんなの変更が、
+              <wbr />
+              <span className="home-shared__live-phrase">
+                <span className="home-live-word">リアルタイム</span>で
+              </span>
+              <wbr />
+              ひとつのプランに。
+            </span>
+          </h2>
           <p>
-            Shared Plans では、行きたいサークル、メモ、購入予定を仲間と共有。
-            招待リンクから参加して、それぞれの「欲しい」と「買いに行ける」を一つの計画にまとめられます。
+            Shared Plans
+            では、行きたいサークル、メモ、購入予定を仲間とリアルタイムに共有。
+            誰かの変更がすぐに届くから、それぞれの「欲しい」と「買いに行ける」を、いつでも同じ計画で確かめられます。
           </p>
           <ul>
             <li>
@@ -283,7 +302,7 @@ export default function HomePage() {
             </li>
             <li>
               <Icon name="users" />
-              <span>招待した仲間と更新</span>
+              <span>変更をリアルタイムで共有</span>
             </li>
           </ul>
         </div>

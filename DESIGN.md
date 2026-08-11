@@ -94,8 +94,14 @@ content sections generally stay open and rely on spacing rather than boxes.
   and a visible focus ring.
 - **Feature row:** sequence number, line icon, display phrase, prose, and compact
   factual tags separated by hairlines.
+- **Realtime emphasis:** `リアルタイム` is the Shared Plans pulse, repeated in
+  the hero route and collaboration passage with dark-green type and one solid
+  accent underline. It stays part of the sentence rather than becoming a badge.
 - **Invitation context:** inviter avatar and display name first, followed by the
   Comiket and explicit Japan-time expiration.
+- **Invitation title:** the dynamic plan name is unquoted and phrase-balanced;
+  the action `に参加` sits on its own smaller line with restrained negative
+  block spacing so it reads as a continuation without enlarging the name.
 - **Invitation action state:** valid and unavailable invitations use the same
   full-page composition. The unavailable state swaps in the iOS-like red status
   strip and ambient warning symbol without becoming a generic error card.

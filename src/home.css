@@ -134,6 +134,25 @@
   line-height: 2;
 }
 
+.home-hero__live,
+.home-live-word {
+  color: #527000;
+  font-weight: 700;
+  text-decoration-line: underline;
+  text-decoration-color: var(--home-accent);
+  text-decoration-thickness: 0.12em;
+  text-underline-offset: 0.13em;
+  text-decoration-skip-ink: none;
+}
+
+.home-hero__live {
+  font-style: normal;
+}
+
+.home-live-word {
+  white-space: nowrap;
+}
+
 .home-hero__actions {
   display: flex;
   align-items: center;
@@ -509,6 +528,8 @@
 .home-shared__content {
   position: relative;
   z-index: 2;
+  box-sizing: border-box;
+  min-width: 0;
   width: min(100%, 60rem);
   padding: clamp(2.25rem, 5vw, 4rem);
   background: #fff;
@@ -525,6 +546,10 @@
   font-weight: 700;
   letter-spacing: -0.05em;
   line-height: 1.22;
+}
+
+.home-shared__live-phrase {
+  white-space: nowrap;
 }
 
 .home-shared__content > p {
@@ -803,7 +828,7 @@
   }
 
   .home-shared__content h2 {
-    font-size: clamp(2.4rem, 12vw, 3.4rem);
+    font-size: clamp(1.9rem, 9.4vw, 3.4rem);
   }
 
   .home-shared__content ul {

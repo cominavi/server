@@ -11,6 +11,12 @@ test("the homepage body is server-rendered from TSX with all seven features", ()
   assert.match(markup, /<main class="home">/);
   assert.equal(markup.match(/class="feature-item"/g)?.length, 7);
   assert.match(markup, /コミケ非公式<wbr\/>ナビゲーション<wbr\/>アプリ/);
+  assert.match(
+    markup,
+    /class="home-hero__live">リアルタイムで、いっしょに計画する。/,
+  );
+  assert.match(markup, /class="home-shared__live-phrase"/);
+  assert.match(markup, /変更をリアルタイムで共有/);
   assert.match(markup, /プライバシー \/ Privacy/);
 });
 

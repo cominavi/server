@@ -39,7 +39,7 @@ const inviterInitial = invitation
 
 <Layout
   title={invitation
-    ? `「${invitation.planName}」に参加 | ComiNavi`
+    ? `${invitation.planName}に参加 | ComiNavi`
     : "この招待は利用できません | ComiNavi"}
   description="ComiNavi の Shared Plan 招待を確認して、アプリで参加できます。"
 >
@@ -73,7 +73,10 @@ const inviterInitial = invitation
           </div>
 
           <div class="invite-content">
-            <h1 id="invite-title">「{invitation.planName}」に参加</h1>
+            <h1 id="invite-title" class="invite-title">
+              <span class="invite-title__plan">{invitation.planName}</span>
+              <span class="invite-title__action">に参加</span>
+            </h1>
             <p class="invite-content__lead">
               サークル、メモ、購入予定を共有して、みんなの「行きたい」を当日の動けるプランへ。
             </p>
@@ -138,9 +141,9 @@ const inviterInitial = invitation
               </a>
               <a
                 class="invite-action invite-action--secondary"
-                href={env.COMINAVI_APP_STORE_URL}
+                href={env.COMINAVI_TESTFLIGHT_URL}
               >
-                <span>App Store で入手</span>
+                <span>TestFlight で試す</span>
                 <svg aria-hidden="true">
                   <use href="#icon-external-link" />
                 </svg>
@@ -189,9 +192,9 @@ const inviterInitial = invitation
               </a>
               <a
                 class="invite-action invite-action--secondary"
-                href={env.COMINAVI_APP_STORE_URL}
+                href={env.COMINAVI_TESTFLIGHT_URL}
               >
-                <span>App Store を開く</span>
+                <span>TestFlight を開く</span>
                 <svg aria-hidden="true">
                   <use href="#icon-external-link" />
                 </svg>
@@ -346,6 +349,40 @@ const inviterInitial = invitation
     overflow-wrap: anywhere;
     text-wrap: balance;
     word-break: auto-phrase;
+  }
+
+  .invite-content .invite-title {
+    overflow-wrap: normal;
+    text-wrap: wrap;
+    word-break: normal;
+  }
+
+  .invite-title__plan,
+  .invite-title__action {
+    display: block;
+  }
+
+  .invite-title__plan {
+    line-break: strict;
+    line-height: 1.08;
+    letter-spacing: -0.025em;
+    overflow-wrap: normal;
+    text-wrap: balance;
+    word-break: normal;
+    hanging-punctuation: allow-end;
+  }
+
+  @supports (word-break: auto-phrase) {
+    .invite-title__plan {
+      word-break: auto-phrase;
+    }
+  }
+
+  .invite-title__action {
+    margin-block-start: -0.12em;
+    font-size: clamp(1.55rem, 3.25vw, 2.35rem);
+    letter-spacing: -0.015em;
+    line-height: 1.2;
   }
 
   .invite-content__lead {
