@@ -11,6 +11,7 @@ import {
   validatePlanMutation,
 } from "../src/lib/server/plan-document";
 import { sha256Hex } from "../src/lib/server/auth-sessions";
+import { planSyncErrorEnvelope } from "../src/lib/server/sync-protocol";
 
 const planID = "11111111-1111-4111-8111-111111111111";
 const userID = "0123456789abcdef0123456789abcdef";
@@ -61,6 +62,158 @@ test("one typed operation reconstructs one exact Automerge change", async () => 
     "日本語 e\u0301 👩‍👩‍👧‍👦",
   );
   assert.equal(acceptedMemo.operations.length, 1);
+});
+
+test("purchase request creation retains its item name and optional price", async () => {
+  const base = await documentWithCircle();
+  const operationID = "45454545-4545-4545-8545-454545454545";
+  const needID = "46464646-4646-4646-8646-464646464646";
+  const proposed = change(base, operationID, {
+    type: "shared_plan.need.create.v1",
+    actorUserID: userID,
+    payload: {
+      v: 1,
+      wcID: 9001,
+      needID,
+      requesterUserID: userID,
+      itemName: "新幹線のきっぷ",
+      unitPrice: 14_720,
+      wantedQuantity: 2,
+    },
+  });
+
+  const accepted = await validatePlanMutation(base, proposed, context());
+  const need = accepted.document.circles["9001"]?.needs[needID];
+  assert.equal(need?.itemName, "新幹線のきっぷ");
+  assert.equal(need?.unitPrice, 14_720);
+  assert.equal(need?.wantedQuantity, 2);
+});
+
+test("new purchase requests reject missing details, invalid prices, and a different requester", async () => {
+  const base = await documentWithCircle();
+  const cases: PlanOperation[] = [
+    {
+      type: "shared_plan.need.create.v1",
+      actorUserID: userID,
+      payload: {
+        v: 1,
+        wcID: 9001,
+        needID: "47474747-4747-4747-8747-474747474747",
+        requesterUserID: userID,
+        itemName: "   ",
+        unitPrice: null,
+        wantedQuantity: 1,
+      },
+    },
+    {
+      type: "shared_plan.need.create.v1",
+      actorUserID: userID,
+      payload: {
+        v: 1,
+        wcID: 9001,
+        needID: "48484848-4848-4848-8848-484848484848",
+        requesterUserID: userID,
+        itemName: "色紙",
+        unitPrice: 10_000_000,
+        wantedQuantity: 1,
+      },
+    },
+    {
+      type: "shared_plan.need.create.v1",
+      actorUserID: userID,
+      payload: {
+        v: 1,
+        wcID: 9001,
+        needID: "49494949-4949-4949-8949-494949494949",
+        requesterUserID: userB,
+        itemName: "色紙",
+        unitPrice: null,
+        wantedQuantity: 1,
+      },
+    },
+  ];
+
+  for (const [index, operation] of cases.entries()) {
+    const operationID = `50505050-5050-4050-8050-50505050505${index}`;
+    await assert.rejects(async () => {
+      const proposed = change(base, operationID, operation);
+      await validatePlanMutation(base, proposed, context());
+    });
+  }
+});
+
+test("rejected operations return bounded recovery metadata without document internals", async () => {
+  const base = await documentWithCircle();
+  const operationID = "51515151-5151-4151-8151-515151515151";
+  const operation: PlanOperation = {
+    type: "shared_plan.need.create.v1",
+    actorUserID: userID,
+    payload: {
+      v: 1,
+      wcID: 9001,
+      needID: "52525252-5252-4252-8252-525252525252",
+      requesterUserID: userID,
+      itemName: "色紙",
+      unitPrice: null,
+      wantedQuantity: 1,
+    },
+  };
+  const candidate = Automerge.change(
+    fresh(base),
+    { message: `operation:${operationID}` },
+    (draft) => {
+      applyPlanOperation(draft, operationID, operation);
+      draft.operations[operationID]!.payload.itemName = " ";
+    },
+  );
+
+  await assert.rejects(
+    validatePlanMutation(base, candidate, context()),
+    (error: unknown) => {
+      assert.ok(
+        error instanceof Error && "code" in error && "details" in error,
+      );
+      const typed = error as Error & {
+        code: string;
+        details: Record<string, unknown>;
+      };
+      assert.equal(typed.code, "invalid_plan_operation");
+      assert.deepEqual(typed.details, {
+        reason: "operation_payload",
+        recovery: "export_and_rebuild_local_copy",
+        localChangesPreserved: true,
+        supportCode: "SP-OP-202",
+      });
+      assert.doesNotMatch(
+        JSON.stringify(typed.details),
+        /9001|52525252|itemName/,
+      );
+      return true;
+    },
+  );
+
+  assert.deepEqual(
+    planSyncErrorEnvelope("invalid_plan_operation", {
+      reason: "operation_payload",
+      recovery: "export_and_rebuild_local_copy",
+      localChangesPreserved: true,
+      supportCode: "SP-OP-202",
+    }),
+    {
+      v: 1,
+      type: "error",
+      code: "invalid_plan_operation",
+      message:
+        "One or more saved changes could not be verified. They remain available on this device for export or recovery.",
+      retryable: false,
+      details: {
+        reason: "operation_payload",
+        recovery: "export_and_rebuild_local_copy",
+        localChangesPreserved: true,
+        supportCode: "SP-OP-202",
+      },
+    },
+  );
 });
 
 test("semantic change messages bind one lowercase operation ID to one change", async () => {

@@ -48,10 +48,36 @@ export function planSyncErrorEnvelope(
     v: 1,
     type: "error",
     code,
-    message: "The sync session cannot continue.",
+    message: syncErrorMessage(code),
     retryable: false,
     ...(details ? { details } : {}),
   };
+}
+
+function syncErrorMessage(code: string): string {
+  switch (code) {
+    case "invalid_plan_operation":
+      return "One or more saved changes could not be verified. They remain available on this device for export or recovery.";
+    case "invalid_plan_document":
+      return "This saved plan copy is not compatible with the server. The local copy remains available for export.";
+    case "unregistered_plan_actor":
+      return "This editing session is no longer authorized. Reopen the plan to start a new session.";
+    case "plan_compaction_required":
+      return "This plan has reached its retained-history limit. Export or rebuild the local copy before syncing again.";
+    case "plan_sync_backlog_limit":
+      // Kept stable because this exact envelope is part of the frozen v1
+      // transport/backlog interoperability fixture.
+      return "The sync session cannot continue.";
+    case "membership_revoked":
+    case "plan_membership_required":
+      return "Your access to this plan has changed. Unsynced local changes remain available for export.";
+    case "role_changed":
+    case "owner_required":
+    case "plan_archived":
+      return "Your editing access changed. Reload the plan before making more changes.";
+    default:
+      return "The sync session ended safely. Reopen the plan to try again.";
+  }
 }
 
 export function classifySyncFrame(

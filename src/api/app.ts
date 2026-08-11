@@ -27,6 +27,13 @@ const openAPIHandler = new OpenAPIHandler(apiRouter, {
   customErrorResponseBodyEncoder: canonicalErrorResponseBody,
 });
 
+const realtimeUpdatesPathPattern =
+  /^\/api\/v2\/events\/(?:[1-9]\d{0,3}|10000)\/updates$/;
+const realtimeUpdatesBrowserCacheControl =
+  "public, max-age=60, stale-while-revalidate=60, stale-if-error=86400";
+const realtimeUpdatesCDNCacheControl =
+  "public, max-age=60, stale-while-revalidate=300, stale-if-error=86400";
+
 export function createHomepageApp(astroFetch: AstroFetch) {
   const app = new Hono<{ Bindings: Cloudflare.Env }>();
 
@@ -102,6 +109,25 @@ export function createHomepageApp(astroFetch: AstroFetch) {
     }
   });
 
+  app.get("/api/v2/events/:eventNumber/updates", (context) => {
+    if (new URL(context.req.url).search.length > 0) {
+      return context.json(
+        {
+          error: "invalid_realtime_query",
+          message: "Realtime updates use one query-free event URL.",
+        },
+        400,
+        {
+          "Cache-Control": "private, no-store",
+          "CDN-Cache-Control": "no-store",
+          "Cloudflare-CDN-Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+        },
+      );
+    }
+    return handleOpenAPIRequest(context);
+  });
+
   app.all("/api/v2", (context) => handleOpenAPIRequest(context));
   app.all("/api/v2/*", (context) => handleOpenAPIRequest(context));
 
@@ -131,7 +157,9 @@ async function handleOpenAPIRequest(
       ...authenticated,
     },
   });
-  if (result.matched) return withCanonicalJSONHeaders(result.response);
+  if (result.matched) {
+    return withCanonicalJSONHeaders(result.response, context.req.raw);
+  }
   return context.json(
     { error: "not_found", message: "The API route was not found." },
     404,
@@ -178,16 +206,76 @@ function catalogJSONTransportRequest(request: Request): Request {
   });
 }
 
-function withCanonicalJSONHeaders(response: Response): Response {
+async function withCanonicalJSONHeaders(
+  response: Response,
+  request: Request,
+): Promise<Response> {
   if (!response.headers.get("Content-Type")?.toLowerCase().includes("json")) {
     return response;
   }
   const headers = new Headers(response.headers);
-  headers.set("Cache-Control", "private, no-store");
   headers.set("X-Content-Type-Options", "nosniff");
+
+  const url = new URL(request.url);
+  if (
+    request.method === "GET" &&
+    response.status === 200 &&
+    url.search.length === 0 &&
+    realtimeUpdatesPathPattern.test(url.pathname)
+  ) {
+    const body = await response.arrayBuffer();
+    const etag = await responseETag(body);
+    headers.set("Access-Control-Allow-Origin", "*");
+    headers.set(
+      "Access-Control-Expose-Headers",
+      "Cache-Control, CDN-Cache-Control, ETag",
+    );
+    headers.set("Cache-Control", realtimeUpdatesBrowserCacheControl);
+    headers.set("CDN-Cache-Control", realtimeUpdatesCDNCacheControl);
+    headers.set("Cloudflare-CDN-Cache-Control", realtimeUpdatesCDNCacheControl);
+    headers.set("ETag", etag);
+
+    if (ifNoneMatchMatches(request.headers.get("If-None-Match"), etag)) {
+      headers.delete("Content-Length");
+      return new Response(null, {
+        status: 304,
+        statusText: "Not Modified",
+        headers,
+      });
+    }
+
+    return new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+
+  headers.set("Cache-Control", "private, no-store");
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
     headers,
   });
+}
+
+async function responseETag(body: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", body);
+  const hex = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  return `"sha256-${hex}"`;
+}
+
+function ifNoneMatchMatches(value: string | null, etag: string): boolean {
+  const expected = etag.startsWith("W/") ? etag.slice(2) : etag;
+  return (
+    value?.split(",").some((candidate) => {
+      const trimmed = candidate.trim();
+      return (
+        trimmed === "*" ||
+        (trimmed.startsWith("W/") ? trimmed.slice(2) : trimmed) === expected
+      );
+    }) ?? false
+  );
 }

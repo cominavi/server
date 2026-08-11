@@ -1,4 +1,4 @@
-import { and, eq, exists, gt, inArray, sql } from "drizzle-orm";
+import { and, eq, exists, sql } from "drizzle-orm";
 
 import {
   circles,
@@ -8,7 +8,6 @@ import {
   socialPosts,
 } from "../db/schema";
 import { createDatabase } from "../db/client";
-import { ServiceError } from "./service-error";
 
 interface UpdateRow {
   id: number;
@@ -30,48 +29,12 @@ interface UpdateRow {
   mediaJSON: string;
 }
 
-export interface RealtimeQuery {
-  after: number;
-  limit: number;
-  wcIDs: number[];
-}
-
-export function parseRealtimeQuery(url: URL): RealtimeQuery {
-  const after = Number(url.searchParams.get("after") ?? "0");
-  const limit = Number(url.searchParams.get("limit") ?? "100");
-  const wcIDs = url.searchParams
-    .getAll("wcID")
-    .flatMap((value) => value.split(","))
-    .filter(Boolean)
-    .map(Number);
-  if (
-    !Number.isSafeInteger(after) ||
-    after < 0 ||
-    !Number.isSafeInteger(limit) ||
-    limit < 1 ||
-    limit > 500 ||
-    wcIDs.length > 500 ||
-    wcIDs.some((value) => !Number.isSafeInteger(value) || value <= 0)
-  ) {
-    throw new ServiceError(
-      "invalid_realtime_query",
-      400,
-      "The realtime update cursor or filter is invalid.",
-    );
-  }
-  return { after, limit, wcIDs: Array.from(new Set(wcIDs)).sort() };
-}
-
 export async function loadRealtimeUpdates(
   database: D1Database,
   eventNumber: number,
-  query: RealtimeQuery,
 ): Promise<{
   eventNumber: number;
   updates: unknown[];
-  nextCursor: number;
-  hasMore: boolean;
-  serverTime: string;
 }> {
   const db = createDatabase(database);
   const matchingTarget = db
@@ -81,9 +44,6 @@ export async function loadRealtimeUpdates(
       and(
         eq(circleUpdateTargets.updateEventID, circleUpdateEvents.id),
         eq(circleUpdateTargets.comiketNo, eventNumber),
-        query.wcIDs.length > 0
-          ? inArray(circleUpdateTargets.wcID, query.wcIDs)
-          : undefined,
       ),
     );
   // SQLite's JSON aggregate remains an intentional SQL expression, while
@@ -145,15 +105,12 @@ export async function loadRealtimeUpdates(
     })
     .from(circleUpdateEvents)
     .innerJoin(socialPosts, eq(socialPosts.postID, circleUpdateEvents.postID))
-    .where(and(gt(circleUpdateEvents.id, query.after), exists(matchingTarget)))
-    .orderBy(circleUpdateEvents.id)
-    .limit(query.limit + 1);
+    .where(exists(matchingTarget))
+    .orderBy(circleUpdateEvents.id);
 
-  const hasMore = rows.length > query.limit;
-  const page = rows.slice(0, query.limit);
   return {
     eventNumber,
-    updates: page.map((row) => ({
+    updates: rows.map((row) => ({
       cursor: row.id,
       eventKey: row.eventKey,
       updateKind: row.updateKind,
@@ -176,9 +133,6 @@ export async function loadRealtimeUpdates(
       },
       circles: parseJSONArray(row.targetsJSON),
     })),
-    nextCursor: page.at(-1)?.id ?? query.after,
-    hasMore,
-    serverTime: new Date().toISOString(),
   };
 }
 

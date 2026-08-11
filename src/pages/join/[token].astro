@@ -23,96 +23,689 @@ if ((await env.COMINAVI_INVITE_RATE_LIMITER.limit({ key })).success) {
     invitation = null;
   }
 }
+
 const fallbackURL = `cominavi://join/${encodeURIComponent(token)}`;
+const expiration = invitation
+  ? new Intl.DateTimeFormat("ja-JP", {
+      dateStyle: "long",
+      timeStyle: "short",
+      timeZone: "Asia/Tokyo",
+    }).format(new Date(invitation.expiresAt))
+  : null;
+const inviterInitial = invitation
+  ? (Array.from(invitation.inviter.displayName.trim()).at(0) ?? "C")
+  : "C";
 ---
 
-<Layout title="Shared Plan に参加 | ComiNavi">
-  <main class="invite-page">
-    <a class="wordmark" href="/">COMINAVI</a>
-    <section class="invite-card" aria-labelledby="invite-title">
-      {
-        invitation ? (
-          <>
-            <p class="eyebrow">COMIKET {invitation.comiketNo}</p>
+<Layout
+  title={invitation
+    ? `「${invitation.planName}」に参加 | ComiNavi`
+    : "この招待は利用できません | ComiNavi"}
+  description="ComiNavi の Shared Plan 招待を確認して、アプリで参加できます。"
+>
+  <main class:list={["invite-page", { "invite-page--error": !invitation }]}>
+    <header class="invite-nav">
+      <a class="invite-wordmark" href="/" aria-label="コミナビ ホーム">
+        <svg aria-hidden="true"><use href="#icon-compass"></use></svg>
+        <span>COMINAVI</span>
+      </a>
+      <a class="invite-nav__about" href="/#features">ComiNavi について</a>
+    </header>
+
+    {
+      invitation ? (
+        <section class="invite-surface" aria-labelledby="invite-title">
+          <svg class="invite-ambient" aria-hidden="true">
+            <use href="#icon-users" />
+          </svg>
+          <svg class="invite-route" viewBox="0 0 520 760" aria-hidden="true">
+            <path d="M430 34v126c0 72-48 108-116 108H204c-68 0-116 38-116 108v96c0 70 48 108 116 108h70c68 0 116 38 116 108v38" />
+            <circle cx="430" cy="34" r="14" />
+            <circle cx="88" cy="424" r="14" />
+            <circle cx="390" cy="726" r="14" />
+          </svg>
+
+          <div class="invite-surface__orientation">
+            <svg aria-hidden="true">
+              <use href="#icon-users" />
+            </svg>
+            <span>共有プランへの招待</span>
+          </div>
+
+          <div class="invite-content">
             <h1 id="invite-title">「{invitation.planName}」に参加</h1>
-            <p>
-              このリンクから参加すると、プラン内のサークル、メモ、購入予定をメンバーと共同編集できます。
-              リンクを持つ人は、有効期限内であれば参加できます。
+            <p class="invite-content__lead">
+              サークル、メモ、購入予定を共有して、みんなの「行きたい」を当日の動けるプランへ。
             </p>
-            <div class="actions">
-              <a class="primary" href={fallbackURL}>ComiNavi で開く</a>
-              <a href={env.COMINAVI_APP_STORE_URL}>App Store で入手</a>
+
+            <div class="invite-context" aria-label="招待の詳細">
+              <div class="invite-person">
+                <div class="invite-avatar" aria-hidden="true">
+                  <span>{inviterInitial}</span>
+                  {invitation.inviter.avatarURL ? (
+                    <img
+                      src={invitation.inviter.avatarURL}
+                      alt=""
+                      width="56"
+                      height="56"
+                    />
+                  ) : null}
+                </div>
+                <div>
+                  <span>招待した人</span>
+                  <strong>{invitation.inviter.displayName}</strong>
+                </div>
+              </div>
+
+              <dl class="invite-facts">
+                <div>
+                  <dt>
+                    <svg aria-hidden="true">
+                      <use href="#icon-calendar-days" />
+                    </svg>
+                    開催回
+                  </dt>
+                  <dd>コミックマーケット {invitation.comiketNo}</dd>
+                </div>
+                <div>
+                  <dt>
+                    <svg aria-hidden="true">
+                      <use href="#icon-clock" />
+                    </svg>
+                    有効期限
+                  </dt>
+                  <dd>
+                    <time datetime={invitation.expiresAt}>
+                      {expiration}（日本時間）
+                    </time>
+                  </dd>
+                </div>
+              </dl>
             </div>
-            <p class="privacy">
-              参加前にアプリでサインインし、あなた自身の表示名とアバターを確認します。
-              このページは特定の受取人を示すものではありません。
+
+            <div class="invite-actions">
+              <a
+                class="invite-action invite-action--primary"
+                href={fallbackURL}
+              >
+                <svg aria-hidden="true">
+                  <use href="#icon-smartphone" />
+                </svg>
+                <span>ComiNavi で開く</span>
+                <svg aria-hidden="true">
+                  <use href="#icon-arrow-right" />
+                </svg>
+              </a>
+              <a
+                class="invite-action invite-action--secondary"
+                href={env.COMINAVI_APP_STORE_URL}
+              >
+                <span>App Store で入手</span>
+                <svg aria-hidden="true">
+                  <use href="#icon-external-link" />
+                </svg>
+              </a>
+            </div>
+
+            <p class="invite-privacy">
+              <svg aria-hidden="true">
+                <use href="#icon-shield-check" />
+              </svg>
+              <span>
+                参加前にアプリでサインインし、あなた自身の表示名とアバターを確認します。
+                この招待リンクは特定の受取人に固定されていません。
+              </span>
             </p>
-          </>
-        ) : (
-          <>
-            <p class="eyebrow">SHARED PLAN</p>
+          </div>
+        </section>
+      ) : (
+        <section
+          class="invite-surface invite-surface--error"
+          aria-labelledby="invite-title"
+        >
+          <svg class="invite-ambient" aria-hidden="true">
+            <use href="#icon-triangle-alert" />
+          </svg>
+
+          <div class="invite-error-strip" role="status">
+            <svg aria-hidden="true">
+              <use href="#icon-triangle-alert" />
+            </svg>
+            <p>リンクを確認できませんでした。</p>
+          </div>
+
+          <div class="invite-content">
             <h1 id="invite-title">この招待は利用できません</h1>
-            <p>リンクが無効、有効期限切れ、または取り消された可能性があります。</p>
-            <div class="actions">
-              <a class="primary" href="/">ComiNavi について見る</a>
-              <a href={env.COMINAVI_APP_STORE_URL}>App Store を開く</a>
+            <p class="invite-content__lead">
+              リンクが無効、有効期限切れ、または取り消された可能性があります。
+              招待した人に新しいリンクを確認してください。
+            </p>
+            <div class="invite-actions">
+              <a class="invite-action invite-action--primary" href="/">
+                <span>ComiNavi について見る</span>
+                <svg aria-hidden="true">
+                  <use href="#icon-arrow-right" />
+                </svg>
+              </a>
+              <a
+                class="invite-action invite-action--secondary"
+                href={env.COMINAVI_APP_STORE_URL}
+              >
+                <span>App Store を開く</span>
+                <svg aria-hidden="true">
+                  <use href="#icon-external-link" />
+                </svg>
+              </a>
             </div>
-          </>
-        )
-      }
-    </section>
+          </div>
+        </section>
+      )
+    }
   </main>
 </Layout>
 
 <style>
   .invite-page {
-    min-height: 100vh;
-    padding: clamp(1.5rem, 5vw, 4rem);
-    background: #f6f2e9;
-    color: #171717;
+    --invite-ink: #161815;
+    --invite-muted: #62685f;
+    --invite-line: #dfe4da;
+    --invite-surface: #ffffff;
+    --invite-soft: #f3f6ef;
+    --invite-accent: #a3d21b;
+    --invite-accent-ink: #253200;
+    position: relative;
+    min-height: 100svh;
+    overflow: hidden;
+    background: var(--invite-surface);
+    color: var(--invite-ink);
   }
-  .wordmark {
+
+  .invite-page svg:not(.invite-route) {
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2;
+  }
+
+  .invite-nav {
+    position: relative;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: min(100%, 90rem);
+    min-height: 4.75rem;
+    margin: 0 auto;
+    padding: 0 clamp(1.25rem, 4vw, 4.5rem);
+    border-bottom: 1px solid var(--invite-line);
+  }
+
+  .invite-wordmark,
+  .invite-nav__about {
     color: inherit;
-    font-weight: 800;
-    letter-spacing: 0.12em;
     text-decoration: none;
   }
-  .invite-card {
-    max-width: 42rem;
-    margin: clamp(4rem, 12vh, 8rem) auto 0;
-    padding: clamp(1.75rem, 5vw, 3.5rem);
-    border: 1px solid #171717;
-    border-radius: 1.5rem;
-    background: #fffdf8;
-    box-shadow: 0.75rem 0.75rem 0 #171717;
-  }
-  .eyebrow {
-    margin: 0 0 1rem;
-    color: #735a24;
-    font-size: 0.78rem;
+
+  .invite-wordmark {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.7rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+    font-size: 0.8rem;
     font-weight: 800;
-    letter-spacing: 0.14em;
+    letter-spacing: 0.13em;
   }
-  h1 {
-    margin: 0 0 1.25rem;
-    font-size: clamp(2rem, 7vw, 3.75rem);
-    line-height: 1.15;
+
+  .invite-wordmark svg {
+    width: 1.45rem;
+    height: 1.45rem;
+    color: var(--invite-accent);
   }
-  p { line-height: 1.9; }
-  .actions {
+
+  .invite-nav__about {
+    min-height: 2.75rem;
+    padding: 0.75rem 0;
+    color: var(--invite-muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+
+  .invite-surface {
+    position: relative;
+    display: grid;
+    align-content: space-between;
+    width: min(100%, 90rem);
+    min-height: calc(100svh - 4.75rem);
+    margin: 0 auto;
+    padding: clamp(2.25rem, 4vw, 3.5rem) clamp(1.25rem, 6vw, 6rem)
+      clamp(2.25rem, 4vw, 3.5rem);
+    isolation: isolate;
+  }
+
+  .invite-surface__orientation {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    color: var(--invite-accent-ink);
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+
+  .invite-surface__orientation svg {
+    width: 2.1rem;
+    height: 2.1rem;
+    color: var(--invite-accent);
+  }
+
+  .invite-ambient {
+    position: absolute;
+    z-index: -2;
+    top: 5%;
+    right: -10%;
+    width: min(62vw, 54rem);
+    height: min(62vw, 54rem);
+    color: var(--invite-accent);
+    opacity: 0.045;
+    transform: rotate(-7deg);
+    pointer-events: none;
+  }
+
+  .invite-route {
+    position: absolute;
+    z-index: -1;
+    top: 1.5rem;
+    right: clamp(-4rem, 1vw, 1rem);
+    width: min(38vw, 32rem);
+    height: calc(100% - 3rem);
+    overflow: visible;
+    fill: var(--invite-surface);
+    stroke: var(--invite-accent);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 8;
+    pointer-events: none;
+  }
+
+  .invite-content {
+    position: relative;
+    z-index: 2;
+    width: min(100%, 42rem);
+    margin-top: clamp(2.5rem, 5vh, 4rem);
+  }
+
+  .invite-content h1 {
+    max-width: 13em;
+    margin: 0;
+    font-size: min(clamp(2.5rem, 6vw, 5rem), 17vw);
+    font-weight: 700;
+    letter-spacing: -0.035em;
+    line-height: 1.16;
+    overflow-wrap: anywhere;
+    text-wrap: balance;
+    word-break: auto-phrase;
+  }
+
+  .invite-content__lead {
+    max-width: 36rem;
+    margin: 1.4rem 0 0;
+    color: var(--invite-muted);
+    font-size: clamp(1rem, 1.5vw, 1.08rem);
+    line-height: 1.9;
+  }
+
+  .invite-context {
+    margin-top: clamp(2.25rem, 5vw, 3.25rem);
+    border-top: 1px solid var(--invite-line);
+    border-bottom: 1px solid var(--invite-line);
+  }
+
+  .invite-person {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    min-height: 5.5rem;
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--invite-line);
+  }
+
+  .invite-avatar {
+    position: relative;
+    display: grid;
+    flex: 0 0 auto;
+    width: 3.5rem;
+    height: 3.5rem;
+    place-items: center;
+    overflow: hidden;
+    border-radius: 50%;
+    background: var(--invite-soft);
+    color: var(--invite-accent-ink);
+    font-size: 1.1rem;
+    font-weight: 700;
+  }
+
+  .invite-avatar img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .invite-person > div:last-child {
+    display: grid;
+    gap: 0.2rem;
+  }
+
+  .invite-person span,
+  .invite-facts dt {
+    color: var(--invite-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .invite-person strong {
+    font-size: 1.05rem;
+    font-weight: 700;
+  }
+
+  .invite-facts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 0;
+  }
+
+  .invite-facts > div {
+    min-width: 0;
+    padding: 1.15rem 0;
+  }
+
+  .invite-facts > div + div {
+    padding-left: 1.5rem;
+    border-left: 1px solid var(--invite-line);
+  }
+
+  .invite-facts dt {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+
+  .invite-facts dt svg {
+    width: 1rem;
+    height: 1rem;
+    color: #73970f;
+  }
+
+  .invite-facts dd {
+    margin: 0.5rem 0 0;
+    font-size: 0.92rem;
+    font-weight: 600;
+    line-height: 1.65;
+  }
+
+  .invite-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 0.75rem;
-    margin: 2rem 0;
+    margin-top: 2rem;
   }
-  .actions a {
-    padding: 0.85rem 1.15rem;
-    border: 1px solid #171717;
+
+  .invite-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.7rem;
+    min-height: 3.35rem;
+    padding: 0.8rem 1.25rem;
     border-radius: 999px;
     color: inherit;
+    font-size: 0.9rem;
     font-weight: 700;
     text-decoration: none;
+    transition:
+      box-shadow 180ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+      background-color 180ms ease-out;
   }
-  .actions .primary { background: #171717; color: #fffdf8; }
-  .privacy { margin-bottom: 0; color: #5b5b5b; font-size: 0.9rem; }
+
+  .invite-action svg {
+    width: 1.15rem;
+    height: 1.15rem;
+  }
+
+  .invite-action--primary {
+    min-width: min(100%, 15rem);
+    background: var(--invite-accent);
+    color: var(--invite-accent-ink);
+    box-shadow: 0 12px 28px rgb(68 91 0 / 16%);
+  }
+
+  .invite-action--primary svg:last-child {
+    margin-left: auto;
+  }
+
+  .invite-action--secondary {
+    background: var(--invite-soft);
+    color: var(--invite-ink);
+  }
+
+  .invite-action:hover {
+    transform: translateY(-2px);
+  }
+
+  .invite-action--primary:hover {
+    box-shadow: 0 16px 34px rgb(68 91 0 / 21%);
+  }
+
+  .invite-action--secondary:hover {
+    background: #e9eee4;
+  }
+
+  .invite-action:active {
+    transform: translateY(0);
+  }
+
+  .invite-wordmark:focus-visible,
+  .invite-nav__about:focus-visible,
+  .invite-action:focus-visible {
+    outline: 3px solid var(--invite-accent);
+    outline-offset: 4px;
+  }
+
+  .invite-privacy {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    max-width: 40rem;
+    margin: 1.4rem 0 0;
+    color: var(--invite-muted);
+    font-size: 0.78rem;
+    line-height: 1.75;
+  }
+
+  .invite-privacy svg {
+    flex: 0 0 auto;
+    width: 1rem;
+    height: 1rem;
+    margin-top: 0.2rem;
+    color: #73970f;
+  }
+
+  .invite-surface--error {
+    padding-top: 1.25rem;
+  }
+
+  .invite-surface--error .invite-ambient {
+    top: 8%;
+    color: #dc454d;
+    opacity: 0.042;
+  }
+
+  .invite-surface--error .invite-content {
+    margin-top: clamp(5rem, 18vh, 12rem);
+  }
+
+  .invite-error-strip {
+    position: relative;
+    z-index: 2;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 1.25rem;
+    align-items: center;
+    max-width: 42rem;
+    padding: 0.9rem 0;
+  }
+
+  .invite-error-strip::before,
+  .invite-error-strip::after {
+    position: absolute;
+    right: 0;
+    left: 3.8rem;
+    height: 1px;
+    background: rgb(220 69 77 / 25%);
+    content: "";
+  }
+
+  .invite-error-strip::before {
+    top: 0;
+  }
+
+  .invite-error-strip::after {
+    bottom: 0;
+    opacity: 0.65;
+  }
+
+  .invite-error-strip svg {
+    width: 2.5rem;
+    height: 2.5rem;
+    color: #dc454d;
+  }
+
+  .invite-error-strip p {
+    margin: 0;
+    font-size: 0.92rem;
+    line-height: 1.6;
+  }
+
+  @media (max-width: 900px) {
+    .invite-route {
+      right: -10rem;
+      width: 30rem;
+      opacity: 0.72;
+    }
+
+    .invite-ambient {
+      right: -22%;
+      width: 46rem;
+      height: 46rem;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .invite-nav {
+      min-height: 4.25rem;
+    }
+
+    .invite-nav__about {
+      font-size: 0.72rem;
+    }
+
+    .invite-surface {
+      min-height: calc(100svh - 4.25rem);
+      padding-top: 1.75rem;
+      padding-bottom: 2rem;
+    }
+
+    .invite-surface__orientation span {
+      font-size: 0.72rem;
+    }
+
+    .invite-content {
+      margin-top: 2.75rem;
+    }
+
+    .invite-content h1 {
+      font-size: clamp(2.25rem, 10.5vw, 3rem);
+    }
+
+    .invite-content__lead {
+      margin-top: 0.9rem;
+      font-size: 0.95rem;
+      line-height: 1.8;
+    }
+
+    .invite-context {
+      margin-top: 1.5rem;
+    }
+
+    .invite-person {
+      min-height: 4.75rem;
+      padding-block: 0.75rem;
+    }
+
+    .invite-route {
+      top: 2rem;
+      right: -18rem;
+      height: 70%;
+      opacity: 0.26;
+      stroke-width: 7;
+    }
+
+    .invite-ambient {
+      top: 9%;
+      right: -52%;
+      width: 34rem;
+      height: 34rem;
+    }
+
+    .invite-facts {
+      display: block;
+    }
+
+    .invite-facts > div + div {
+      padding-left: 0;
+      border-top: 1px solid var(--invite-line);
+      border-left: 0;
+    }
+
+    .invite-facts > div {
+      padding-block: 0.9rem;
+    }
+
+    .invite-actions {
+      display: grid;
+      margin-top: 1.4rem;
+    }
+
+    .invite-action {
+      width: 100%;
+    }
+
+    .invite-surface--error .invite-content {
+      margin-top: clamp(4rem, 12vh, 7rem);
+    }
+
+    .invite-surface--error .invite-content h1 {
+      font-size: clamp(2.5rem, 12vw, 3.5rem);
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .invite-ambient {
+      animation: invite-float 8s ease-in-out infinite alternate;
+    }
+  }
+
+  @keyframes invite-float {
+    from {
+      transform: translate3d(-0.6rem, 0.5rem, 0) rotate(-7deg);
+    }
+
+    to {
+      transform: translate3d(0.8rem, -0.7rem, 0) rotate(-4deg);
+    }
+  }
 </style>

@@ -31,6 +31,13 @@
   box-sizing: border-box;
 }
 
+.icon-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
 html {
   scroll-behavior: smooth;
 }
@@ -45,7 +52,6 @@ body {
 body {
   overflow-x: hidden;
   background: var(--paper);
-  animation: fade-in 500ms ease-out;
 }
 
 a {
@@ -591,16 +597,6 @@ h4.cjk-phrase,
 .privacy__english section {
   padding: 2rem 0;
   border-top: 1px solid var(--line);
-}
-
-@keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
 }
 
 @media (max-width: 800px) {

@@ -1,16 +1,9 @@
 import { z } from "zod";
 import { parseEventNumber } from "../../lib/server/favorites";
 import { loadRealtimeUpdates } from "../../lib/server/realtime-api";
-import { authenticatedProcedure } from "../core";
+import { publicProcedure } from "../core";
 
 const eventNumberSchema = z.coerce.number().int().positive().max(10_000);
-const wcIDSchema = z.coerce.number().int().positive();
-const wcIDQuerySchema = z.preprocess((value) => {
-  const values = Array.isArray(value) ? value : [value];
-  return values.flatMap((item) =>
-    typeof item === "string" ? item.split(",").filter(Boolean) : [item],
-  );
-}, z.array(wcIDSchema).max(500));
 
 const realtimeMediaSchema = z.object({
   key: z.string().min(1).max(500),
@@ -70,12 +63,9 @@ const realtimeUpdateSchema = z.object({
   circles: z.array(realtimeCircleSchema).max(20),
 });
 
-const realtimePageSchema = z.object({
+const realtimeSnapshotSchema = z.object({
   eventNumber: z.number().int().positive().max(10_000),
-  updates: z.array(realtimeUpdateSchema).max(500),
-  nextCursor: z.number().int().nonnegative(),
-  hasMore: z.boolean(),
-  serverTime: z.iso.datetime(),
+  updates: z.array(realtimeUpdateSchema),
 });
 
 interface RawRealtimeMedia {
@@ -127,40 +117,28 @@ interface RawRealtimeUpdate {
   circles: RawRealtimeCircle[];
 }
 
-export const listRealtimeUpdates = authenticatedProcedure
+export const listRealtimeUpdates = publicProcedure
   .route({
     method: "GET",
     path: "/api/v2/events/{eventNumber}/updates",
     operationId: "listRealtimeUpdates",
-    summary: "List realtime event updates",
+    summary: "Get realtime event updates",
     description:
-      "Returns a stable cursor page of realtime circle updates for one Comiket. The optional WCID filter accepts at most 500 entries, deduplicates them, and each page contains at most 500 updates.",
+      "Returns one cacheable JSON representation containing every immutable realtime circle update for one Comiket, in ascending cursor order.",
     tags: ["Realtime"],
     inputStructure: "detailed",
   })
   .input(
     z.object({
       params: z.object({ eventNumber: eventNumberSchema }),
-      query: z.object({
-        after: z.coerce.number().int().nonnegative().default(0),
-        limit: z.coerce.number().int().min(1).max(500).default(100),
-        wcID: wcIDQuerySchema.optional(),
-      }),
     }),
   )
-  .output(realtimePageSchema)
+  .output(realtimeSnapshotSchema)
   .handler(async ({ context, input }) => {
     const eventNumber = parseEventNumber(String(input.params.eventNumber));
     const result = await loadRealtimeUpdates(
       context.env.COMINAVI_DB,
       eventNumber,
-      {
-        after: input.query.after,
-        limit: input.query.limit,
-        wcIDs: Array.from(new Set(input.query.wcID ?? [])).sort(
-          (left, right) => left - right,
-        ),
-      },
     );
     return {
       ...result,

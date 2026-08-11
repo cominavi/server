@@ -1,0 +1,8 @@
+{
+  "approved": true,
+  "approval": "The user explicitly selected composition 3 and prioritized the invitation page.",
+  "implementation": "Implemented as a responsive three-stop route through discovery, Shared Plans, and venue navigation. The invitation page carries the same route and focused-action language into valid and unavailable states.",
+  "prompt": "ComiNavi desktop homepage composition C: continuous route through discover, plan, and navigate states, iOS action-surface language, #A3D21B, no gradients or paper styling.",
+  "qa": "Validated at 1440x1000 and 390x844; valid invite includes inviter avatar, inviter display name, Comiket context, expiration, and a first-viewport app action.",
+  "viewport": "1440x1000"
+}

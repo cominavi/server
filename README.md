@@ -190,6 +190,12 @@ but every Circle.ms request is bound to one explicit environment and never
 probes or falls back to the other. Scheduled public catalog refresh accepts
 production Circle.ms credentials only.
 
+Workers Caching is enabled for the default entrypoint. API responses are
+`private, no-store` unless a route deliberately opts into shared caching; the
+canonical realtime snapshot uses separate browser and Cloudflare SWR headers.
+Keep authentication, invitation, OAuth, and other user-specific responses
+explicitly non-cacheable when adding routes handled by the Worker.
+
 Configure the required secrets. `COMINAVI_PROVIDER_CREDENTIAL_KEY_V1` is an
 exact 32-byte AES key encoded as unpadded base64url; retain an old key version
 until all values encrypted by it have been rotated. Apple supplies the Key ID

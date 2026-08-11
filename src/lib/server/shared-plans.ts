@@ -77,6 +77,11 @@ interface InvitationRow {
   created_at: number;
   plan_name: string;
   comiket_no: number;
+  created_by_public_id: string;
+  created_by_display_name: string;
+  created_by_avatar_object_key: string | null;
+  created_by_avatar_content_type:
+    "image/jpeg" | "image/png" | "image/webp" | null;
 }
 
 export interface CollectionPage {
@@ -1381,6 +1386,11 @@ export async function previewInvitation(
   planName: string;
   comiketNo: number;
   expiresAt: string;
+  inviter: {
+    userID: string;
+    displayName: string;
+    avatarURL: string | null;
+  };
 }> {
   const row = await findValidInvitation(
     database,
@@ -1394,7 +1404,48 @@ export async function previewInvitation(
     planName: row.plan_name,
     comiketNo: row.comiket_no,
     expiresAt: new Date(row.expires_at * 1_000).toISOString(),
+    inviter: {
+      userID: row.created_by_public_id,
+      displayName: row.created_by_display_name,
+      avatarURL: row.created_by_avatar_object_key
+        ? `/join/${token}/avatar`
+        : null,
+    },
   };
+}
+
+export async function loadInvitationInviterAvatar(
+  database: D1Database,
+  bucket: R2Bucket,
+  token: string,
+  tokenSecret: string,
+  nowMilliseconds = Date.now(),
+): Promise<Response> {
+  const row = await findValidInvitation(
+    database,
+    token,
+    tokenSecret,
+    nowMilliseconds,
+  );
+  if (
+    !row?.created_by_avatar_object_key ||
+    !row.created_by_avatar_content_type
+  ) {
+    throw invitationNotFound();
+  }
+  const object = await bucket.get(row.created_by_avatar_object_key);
+  if (!object) throw invitationNotFound();
+  return new Response(object.body, {
+    headers: {
+      "Cache-Control": "no-store",
+      "Content-Length": String(object.size),
+      "Content-Type": row.created_by_avatar_content_type,
+      ETag: object.httpEtag,
+      "Referrer-Policy": "no-referrer",
+      "X-Content-Type-Options": "nosniff",
+      "X-Robots-Tag": "noindex, nofollow, noarchive",
+    },
+  });
 }
 
 export async function acceptInvitation(
@@ -1575,11 +1626,17 @@ async function findValidInvitation(
     parameterizedSQL(
       `SELECT invitation.id, invitation.plan_id,
               invitation.expires_at, invitation.revoked_at,
-              invitation.created_at, plan.name AS plan_name, plan.comiket_no
+              invitation.created_at, plan.name AS plan_name, plan.comiket_no,
+              creator.public_id AS created_by_public_id,
+              creator.display_name AS created_by_display_name,
+              creator.avatar_object_key AS created_by_avatar_object_key,
+              creator.avatar_content_type AS created_by_avatar_content_type
        FROM shared_plan_invitations AS invitation
        JOIN shared_plans AS plan ON plan.id = invitation.plan_id
+       JOIN users AS creator ON creator.id = invitation.created_by_user_id
        WHERE invitation.token_hash = ?1 AND invitation.revoked_at IS NULL
-         AND invitation.expires_at > ?2 AND plan.archived_at IS NULL`,
+         AND invitation.expires_at > ?2 AND plan.archived_at IS NULL
+         AND creator.deletion_pending_at IS NULL`,
       [tokenHash, Math.floor(nowMilliseconds / 1_000)],
     ),
   );

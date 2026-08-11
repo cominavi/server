@@ -14,6 +14,10 @@
   },
   "compatibility_date": "2026-07-14",
   "compatibility_flags": ["nodejs_compat"],
+  "cache": {
+    "enabled": true,
+    "cross_version_cache": false,
+  },
   "observability": {
     "enabled": false,
     "head_sampling_rate": 1,

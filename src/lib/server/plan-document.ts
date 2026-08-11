@@ -27,6 +27,8 @@ export interface PlanNeed {
   rootOperationID: string;
   presence: { state: "active" | "removed"; operationID: string };
   requesterUserID: string;
+  itemName?: string;
+  unitPrice?: number | null;
   wantedQuantity: number;
   buyerAllocations: Record<string, number>;
   fulfilledQuantity: number;
@@ -120,6 +122,18 @@ export class PlanDocumentError extends Error {
   }
 }
 
+type PlanOperationRejectionReason =
+  | "change_set"
+  | "change_order"
+  | "change_binding"
+  | "change_application"
+  | "operation_binding"
+  | "operation_payload"
+  | "member_reference"
+  | "parent_resolution"
+  | "exact_change_proof"
+  | "final_consistency";
+
 const maximumSavedDocumentBytes = 1_500_000;
 const maximumMemoBytes = 64 * 1024;
 const maximumCircles = 2_000;
@@ -132,6 +146,9 @@ const maximumCommunicationFields = 64;
 const maximumCommunicationBytes = 16 * 1024;
 const maximumConflicts = 2_000;
 const maximumQuantity = 999;
+const maximumItemNameCharacters = 80;
+const maximumItemNameBytes = 512;
+const maximumUnitPrice = 9_999_999;
 const publicIDPattern = /^[0-9a-f]{32}$/;
 const actorIDPattern = /^[0-9a-f]{16,128}$/;
 const changeHashPattern = /^[0-9a-f]{64}$/;
@@ -158,19 +175,20 @@ export async function validatePlanMutation(
   try {
     changes = Automerge.getChanges(current, candidate);
   } catch {
-    throw invalidOperation();
+    throw invalidOperation("change_set");
   }
-  if (changes.length === 0) throw invalidOperation();
+  if (changes.length === 0) throw invalidOperation("change_set");
   if (changes.length > maximumNewOperationsPerSyncFrame)
     throw new PlanDocumentError("plan_sync_backlog_limit", {
       maximumNewOperationsPerSyncFrame,
       receivedChanges: changes.length,
     });
-  const sorted = topologicalChanges(current, changes);
-  const semanticOperationIDsByChange = assertSemanticChangeMessages(
-    current,
-    candidate,
-    sorted,
+  const sorted = withInvalidOperationReason("change_order", () =>
+    topologicalChanges(current, changes),
+  );
+  const semanticOperationIDsByChange = withInvalidOperationReason(
+    "change_binding",
+    () => assertSemanticChangeMessages(current, candidate, sorted),
   );
   const finalHeads = sortedHeads(candidate);
   const operations: ValidatedPlanOperation[] = [];
@@ -207,42 +225,51 @@ export async function validatePlanMutation(
         after = Automerge.view(candidate, [item.decoded.hash]);
       }
     } catch {
-      throw invalidOperation();
+      throw invalidOperation("change_application");
     }
     const beforeOperations = before.operations;
     const afterOperations = after.operations;
     const inserted = Object.keys(afterOperations).filter(
       (operationID) => !(operationID in beforeOperations),
     );
-    if (inserted.length !== 1) throw invalidOperation();
+    if (inserted.length !== 1) throw invalidOperation("operation_binding");
     const operationID = inserted[0]!;
     if (
       !isCanonicalSyncUUID(operationID) ||
       semanticOperationIDsByChange.get(item.decoded.hash) !== operationID
     )
-      throw invalidOperation();
-    assertNoOperationConflict(after, operationID);
-    const operation = parseOperation(afterOperations[operationID]);
-    if (operation.actorUserID !== actor.userPublicID) throw invalidOperation();
-    validateOperationMemberReferences(operation, context.activeMemberPublicIDs);
-    await assertParentResolutionDoesNotCollapseNestedConflicts(
-      before,
-      operation,
-    );
-    if (advancesWorking) {
-      const reconstructed = reconstructSequentialExactPatch(
-        expectedWorking,
-        operationID,
+      throw invalidOperation("operation_binding");
+    const operation = withInvalidOperationReason("operation_payload", () => {
+      assertNoOperationConflict(after, operationID);
+      return parseOperation(afterOperations[operationID]);
+    });
+    if (operation.actorUserID !== actor.userPublicID)
+      throw invalidOperation("member_reference");
+    withInvalidOperationReason("member_reference", () =>
+      validateOperationMemberReferences(
         operation,
-        item.decoded,
-        expectedToActualOperationID,
-        hasUnresolvedSemanticConflict(before, operation),
-      );
-      expectedWorking = reconstructed.document;
-      expectedToActualOperationID = reconstructed.expectedToActualOperationID;
-    } else {
-      reconstructExactPatch(before, operationID, operation, item.decoded);
-    }
+        context.activeMemberPublicIDs,
+      ),
+    );
+    await withInvalidOperationReasonAsync("parent_resolution", () =>
+      assertParentResolutionDoesNotCollapseNestedConflicts(before, operation),
+    );
+    withInvalidOperationReason("exact_change_proof", () => {
+      if (advancesWorking) {
+        const reconstructed = reconstructSequentialExactPatch(
+          expectedWorking,
+          operationID,
+          operation,
+          item.decoded,
+          expectedToActualOperationID,
+          hasUnresolvedSemanticConflict(before, operation),
+        );
+        expectedWorking = reconstructed.document;
+        expectedToActualOperationID = reconstructed.expectedToActualOperationID;
+      } else {
+        reconstructExactPatch(before, operationID, operation, item.decoded);
+      }
+    });
     const payloadHash = await sha256Hex(canonicalJSON(operation.payload));
     operations.push({
       operationID,
@@ -261,7 +288,7 @@ export async function validatePlanMutation(
           item.bytes,
         ]);
       } catch {
-        throw invalidOperation();
+        throw invalidOperation("change_application");
       }
       expectedWorking = Automerge.clone(validationWorking, {
         actor: validationActorID(validationWorking),
@@ -273,13 +300,13 @@ export async function validatePlanMutation(
   if (
     canonicalJSON(sortedHeads(validationWorking)) !== canonicalJSON(finalHeads)
   )
-    throw invalidOperation();
+    throw invalidOperation("final_consistency");
   const working = validationWorking;
   if (
     canonicalJSON(contentProjection(expectedWorking)) !==
     canonicalJSON(contentProjection(working))
   )
-    throw invalidOperation();
+    throw invalidOperation("final_consistency");
   validateDocumentStructure(working, context.planID, context.comiketNo, false);
   const saved = Automerge.save(working);
   if (saved.byteLength > maximumSavedDocumentBytes)
@@ -397,6 +424,13 @@ export function applyPlanOperation(
       const needID = requiredUUID(payload.needID);
       const requesterUserID = requiredPublicID(payload.requesterUserID);
       const wantedQuantity = requiredQuantity(payload.wantedQuantity);
+      const hasItemDetails = "itemName" in payload || "unitPrice" in payload;
+      const itemName = hasItemDetails
+        ? requiredItemName(payload.itemName)
+        : undefined;
+      const unitPrice = hasItemDetails
+        ? requiredOptionalUnitPrice(payload.unitPrice)
+        : undefined;
       const existing = active.needs[needID];
       const competingNeeds = parentConflictValues<PlanNeed>(
         active.needs,
@@ -409,12 +443,19 @@ export function applyPlanOperation(
           throw invalidOperation();
         existing.presence = { state: "active", operationID };
         existing.requesterUserID = requesterUserID;
+        if (itemName !== undefined) {
+          existing.itemName = itemName;
+          existing.unitPrice = unitPrice ?? null;
+        }
         writeStoredValue(existing, "wantedQuantity", wantedQuantity);
       } else {
         writeStoredValue(active.needs, needID, {
           rootOperationID: operationID,
           presence: { state: "active", operationID },
           requesterUserID,
+          ...(itemName === undefined
+            ? {}
+            : { itemName, unitPrice: unitPrice ?? null }),
           wantedQuantity,
           buyerAllocations: {},
           fulfilledQuantity: 0,
@@ -1072,23 +1113,35 @@ function validateDocumentStructure(
 }
 
 function validateNeed(needID: string, value: unknown): void {
+  const legacyKeys = [
+    "requesterUserID",
+    "rootOperationID",
+    "wantedQuantity",
+    "buyerAllocations",
+    "fulfilledQuantity",
+    "presence",
+  ];
+  const currentKeys = [...legacyKeys, "itemName", "unitPrice"];
   if (
     !isCanonicalSyncUUID(needID) ||
     !isPlainRecord(value) ||
-    !hasExactKeys(value, [
-      "requesterUserID",
-      "rootOperationID",
-      "wantedQuantity",
-      "buyerAllocations",
-      "fulfilledQuantity",
-      "presence",
-    ]) ||
+    (!hasExactKeys(value, legacyKeys) && !hasExactKeys(value, currentKeys)) ||
     !isPlainRecord(value.presence) ||
     !isCanonicalSyncUUID(value.rootOperationID) ||
     !hasExactKeys(value.presence, ["state", "operationID"]) ||
     !["active", "removed"].includes(String(value.presence.state)) ||
     !isCanonicalSyncUUID(value.presence.operationID) ||
     !publicIDPattern.test(String(value.requesterUserID)) ||
+    ("itemName" in value &&
+      (() => {
+        try {
+          requiredItemName(value.itemName);
+          requiredOptionalUnitPrice(value.unitPrice);
+          return false;
+        } catch {
+          return true;
+        }
+      })()) ||
     !isSafeInteger(value.wantedQuantity, 0, maximumQuantity) ||
     !isSafeInteger(value.fulfilledQuantity, 0, maximumQuantity) ||
     !isPlainRecord(value.buyerAllocations)
@@ -1150,12 +1203,25 @@ function validatePayload(operation: PlanOperation): void {
       requiredString(payload.text, maximumMemoBytes);
       break;
     case "shared_plan.need.create.v1":
-      exactPayload(payload, [
-        ...common,
-        "needID",
-        "requesterUserID",
-        "wantedQuantity",
-      ]);
+      if (
+        !hasExactKeys(payload, [
+          ...common,
+          "needID",
+          "requesterUserID",
+          "wantedQuantity",
+        ])
+      ) {
+        exactPayload(payload, [
+          ...common,
+          "needID",
+          "requesterUserID",
+          "itemName",
+          "unitPrice",
+          "wantedQuantity",
+        ]);
+        requiredItemName(payload.itemName);
+        requiredOptionalUnitPrice(payload.unitPrice);
+      }
       requiredUUID(payload.needID);
       requiredPublicID(payload.requesterUserID);
       requiredQuantity(payload.wantedQuantity);
@@ -1208,7 +1274,9 @@ function validateOperationMemberReferences(
 ): void {
   if (
     operation.type === "shared_plan.need.create.v1" &&
-    !members.has(String(operation.payload.requesterUserID))
+    (!members.has(String(operation.payload.requesterUserID)) ||
+      ("itemName" in operation.payload &&
+        operation.actorUserID !== operation.payload.requesterUserID))
   ) {
     throw invalidOperation();
   }
@@ -1696,6 +1764,12 @@ function cloneNeed(value: PlanNeed): PlanNeed {
       operationID: String(value.presence.operationID),
     },
     requesterUserID: String(value.requesterUserID),
+    ...(value.itemName === undefined
+      ? {}
+      : {
+          itemName: String(value.itemName),
+          unitPrice: value.unitPrice ?? null,
+        }),
     wantedQuantity: value.wantedQuantity,
     buyerAllocations: Object.fromEntries(
       Object.entries(value.buyerAllocations),
@@ -2300,6 +2374,22 @@ function requiredQuantity(value: unknown): number {
   return requiredInteger(value, 0, maximumQuantity);
 }
 
+function requiredItemName(value: unknown): string {
+  const itemName = requiredString(value, maximumItemNameBytes).trim();
+  if (
+    itemName.length === 0 ||
+    Array.from(itemName).length > maximumItemNameCharacters
+  ) {
+    throw invalidOperation();
+  }
+  return itemName;
+}
+
+function requiredOptionalUnitPrice(value: unknown): number | null {
+  if (value === null) return null;
+  return requiredInteger(value, 0, maximumUnitPrice);
+}
+
 function requiredInteger(
   value: unknown,
   minimum: number,
@@ -2474,8 +2564,74 @@ function invalidDocument(): PlanDocumentError {
   return new PlanDocumentError("invalid_plan_document");
 }
 
-function invalidOperation(): PlanDocumentError {
-  return new PlanDocumentError("invalid_plan_operation");
+function invalidOperation(
+  reason?: PlanOperationRejectionReason,
+): PlanDocumentError {
+  return new PlanDocumentError(
+    "invalid_plan_operation",
+    reason
+      ? {
+          reason,
+          recovery: "export_and_rebuild_local_copy",
+          localChangesPreserved: true,
+          supportCode: operationRejectionSupportCode(reason),
+        }
+      : undefined,
+  );
+}
+
+function withInvalidOperationReason<T>(
+  reason: PlanOperationRejectionReason,
+  operation: () => T,
+): T {
+  try {
+    return operation();
+  } catch (error) {
+    if (
+      error instanceof PlanDocumentError &&
+      error.code === "invalid_plan_operation" &&
+      !error.details?.reason
+    ) {
+      throw invalidOperation(reason);
+    }
+    throw error;
+  }
+}
+
+async function withInvalidOperationReasonAsync<T>(
+  reason: PlanOperationRejectionReason,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (
+      error instanceof PlanDocumentError &&
+      error.code === "invalid_plan_operation" &&
+      !error.details?.reason
+    ) {
+      throw invalidOperation(reason);
+    }
+    throw error;
+  }
+}
+
+function operationRejectionSupportCode(
+  reason: PlanOperationRejectionReason,
+): string {
+  const codes: Record<PlanOperationRejectionReason, string> = {
+    change_set: "SP-OP-101",
+    change_order: "SP-OP-102",
+    change_binding: "SP-OP-103",
+    change_application: "SP-OP-104",
+    operation_binding: "SP-OP-201",
+    operation_payload: "SP-OP-202",
+    member_reference: "SP-OP-203",
+    parent_resolution: "SP-OP-301",
+    exact_change_proof: "SP-OP-302",
+    final_consistency: "SP-OP-401",
+  };
+  return codes[reason];
 }
 
 function documentLimit(): PlanDocumentError {

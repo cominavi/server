@@ -3,6 +3,7 @@ import test from "node:test";
 import { OpenAPIGenerator } from "@orpc/openapi";
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
+import { createHomepageApp } from "../src/api/app";
 import { canonicalErrorResponseBody } from "../src/api/core";
 import { pushDeviceRouter } from "../src/api/routers/push-devices";
 import { realtimeUpdatesRouter } from "../src/api/routers/realtime-updates";
@@ -20,8 +21,15 @@ const handler = new OpenAPIHandler(apiRouter, {
 
 const jwtSecret = "push-realtime-router-test-secret-at-least-32-bytes";
 const publicUserID = "0123456789abcdef0123456789abcdef";
+const executionContext = {
+  waitUntil() {},
+  passThroughOnException() {},
+  props: {},
+  exports: {},
+  tracing: {},
+} as unknown as ExecutionContext;
 
-test("push and realtime routers publish bounded non-nullable OpenAPI contracts", async () => {
+test("push and realtime routers publish non-nullable OpenAPI contracts", async () => {
   const generator = new OpenAPIGenerator({
     schemaConverters: [new ZodToJsonSchemaConverter()],
   });
@@ -36,18 +44,16 @@ test("push and realtime routers publish bounded non-nullable OpenAPI contracts",
   assert.equal(register?.operationId, "registerPushDevice");
   assert.equal(disable?.operationId, "disablePushDevice");
   assert.equal(updates?.operationId, "listRealtimeUpdates");
+  assert.deepEqual(updates?.security, []);
   assert.ok(disable?.responses?.["200"]);
 
   const updateParameters = (updates?.parameters ?? []) as Array<{
     name?: string;
-    schema?: { default?: number; maximum?: number; maxItems?: number };
   }>;
-  const parameter = (name: string) =>
-    updateParameters.find((candidate) => candidate.name === name)?.schema;
-  assert.equal(parameter("after")?.default, 0);
-  assert.equal(parameter("limit")?.default, 100);
-  assert.equal(parameter("limit")?.maximum, 500);
-  assert.equal(parameter("wcID")?.maxItems, 500);
+  assert.deepEqual(
+    updateParameters.map((parameter) => parameter.name),
+    ["eventNumber"],
+  );
   assert.doesNotMatch(JSON.stringify(document), /"nullable"/);
   assert.doesNotMatch(JSON.stringify(document), /"null"/);
 });
@@ -112,67 +118,34 @@ test("push-device transport registers and idempotently disables an installation"
   );
 });
 
-test("realtime transport applies WCID filtering and cursor pagination", async () => {
+test("realtime transport returns every event update in one public snapshot", async () => {
   const database = serviceDatabase();
-  seedUser(database);
   seedRealtimeUpdates(database);
-  const authorization = await bearerAuthorization();
   const env = serviceEnvironment(database);
 
-  const first = await dispatch(
-    new Request(
-      "https://cominavi.net/api/v2/events/108/updates?after=0&limit=1&wcID=101",
-      { headers: { Authorization: authorization } },
-    ),
+  const response = await dispatch(
+    new Request("https://cominavi.net/api/v2/events/108/updates"),
     env,
   );
-  assert.equal(first.status, 200, await first.clone().text());
-  const firstBody = await first.json<{
-    serverTime: string;
-    [key: string]: unknown;
+  assert.equal(response.status, 200, await response.clone().text());
+  const body = await response.json<{
+    eventNumber: number;
+    updates: Array<{
+      cursor: number;
+      post: { media: unknown[] };
+      circles: Array<{ wcID: number }>;
+    }>;
   }>();
-  assert.match(firstBody.serverTime, /^\d{4}-\d{2}-\d{2}T/);
-  const { serverTime: _serverTime, ...stableFirstBody } = firstBody;
-  assert.deepEqual(stableFirstBody, {
-    eventNumber: 108,
-    updates: [
-      {
-        cursor: 1,
-        eventKey: "event-1",
-        updateKind: "presence_present",
-        stateKind: "presence",
-        stateValue: "present",
-        confidence: "high",
-        occurredAt: "2023-11-14T22:13:20.000Z",
-        sourceRevision: 1,
-        post: {
-          id: "post-1",
-          text: "First update",
-          author: { handle: "circle_one" },
-          media: [],
-        },
-        circles: [{ eventNumber: 108, wcID: 101, circleName: "Circle One" }],
-      },
-    ],
-    nextCursor: 1,
-    hasMore: true,
-  });
-
-  const next = await dispatch(
-    new Request(
-      "https://cominavi.net/api/v2/events/108/updates?after=1&limit=1&wcID=101",
-      { headers: { Authorization: authorization } },
-    ),
-    env,
+  assert.equal(body.eventNumber, 108);
+  assert.deepEqual(
+    body.updates.map((update) => update.cursor),
+    [1, 2, 3],
   );
-  assert.equal(next.status, 200);
-  const nextBody = await next.json<{
-    updates: Array<{ cursor: number; post: { media: unknown[] } }>;
-    nextCursor: number;
-    hasMore: boolean;
-  }>();
-  assert.equal(nextBody.updates[0]?.cursor, 3);
-  assert.deepEqual(nextBody.updates[0]?.post.media, [
+  assert.deepEqual(
+    body.updates.map((update) => update.circles.map((circle) => circle.wcID)),
+    [[101], [102], [101]],
+  );
+  assert.deepEqual(body.updates[2]?.post.media, [
     {
       key: "media-3",
       type: "image/jpeg",
@@ -184,21 +157,56 @@ test("realtime transport applies WCID filtering and cursor pagination", async ()
       payloadSHA256: "d".repeat(64),
     },
   ]);
-  assert.equal(nextBody.nextCursor, 3);
-  assert.equal(nextBody.hasMore, false);
+  assert.deepEqual(Object.keys(body).sort(), ["eventNumber", "updates"]);
+});
 
-  const tooManyWCIDs = Array.from(
-    { length: 501 },
-    (_, index) => index + 1,
-  ).join(",");
-  const rejected = await dispatch(
-    new Request(
-      `https://cominavi.net/api/v2/events/108/updates?wcID=${tooManyWCIDs}`,
-      { headers: { Authorization: authorization } },
+test("homepage serves the canonical snapshot with SWR headers and ETag revalidation", async () => {
+  const database = serviceDatabase();
+  seedRealtimeUpdates(database);
+  const env = serviceEnvironment(database);
+  const app = createHomepageApp(() => new Response("astro"));
+  const url = "https://cominavi.net/api/v2/events/108/updates";
+
+  const response = await app.fetch(new Request(url), env, executionContext);
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(
+    response.headers.get("Cache-Control"),
+    "public, max-age=60, stale-while-revalidate=60, stale-if-error=86400",
+  );
+  assert.equal(
+    response.headers.get("Cloudflare-CDN-Cache-Control"),
+    "public, max-age=60, stale-while-revalidate=300, stale-if-error=86400",
+  );
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), "*");
+  const etag = response.headers.get("ETag");
+  assert.match(etag ?? "", /^"sha256-[0-9a-f]{64}"$/);
+  assert.deepEqual(
+    (await response.json<{ updates: Array<{ cursor: number }> }>()).updates.map(
+      (update) => update.cursor,
     ),
+    [1, 2, 3],
+  );
+
+  const unchanged = await app.fetch(
+    new Request(url, { headers: { "If-None-Match": `W/${etag}` } }),
     env,
+    executionContext,
+  );
+  assert.equal(unchanged.status, 304);
+  assert.equal(unchanged.headers.get("ETag"), etag);
+  assert.equal(await unchanged.text(), "");
+
+  const rejected = await app.fetch(
+    new Request(`${url}?after=1`),
+    env,
+    executionContext,
   );
   assert.equal(rejected.status, 400);
+  assert.equal(rejected.headers.get("Cache-Control"), "private, no-store");
+  assert.deepEqual(await rejected.json(), {
+    error: "invalid_realtime_query",
+    message: "Realtime updates use one query-free event URL.",
+  });
 });
 
 async function dispatch(

@@ -35,6 +35,7 @@ const userColumns = `
   display_name TEXT NOT NULL,
   avatar_provider_url TEXT,
   avatar_object_key TEXT,
+  avatar_content_type TEXT,
   profile_revision INTEGER NOT NULL DEFAULT 1,
   auth_version INTEGER NOT NULL DEFAULT 1,
   deletion_pending_at INTEGER
@@ -848,6 +849,61 @@ test("invitation revoke is marker-causal and removed members cannot replay accep
           WHERE request_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3') AS receipts`,
     ),
     [{ members: 0, receipts: 0 }],
+  );
+});
+
+test("invitation preview includes expiration and inviter identity", async () => {
+  const database = setup();
+  database.native
+    .prepare(
+      `UPDATE users
+       SET display_name = 'Inviting Owner',
+           avatar_object_key = 'avatars/inviting-owner.webp',
+           avatar_content_type = 'image/webp'
+       WHERE id = 1`,
+    )
+    .run();
+  const created = await createSharedPlan(
+    database.binding,
+    identity(1),
+    {
+      requestID: "preview-inviter-plan",
+      name: "Meet together",
+      comiketNo: 108,
+    },
+    1_000_000,
+  );
+  const invitation = (await createInvitation(
+    database.binding,
+    identity(1),
+    created.plan.id,
+    {
+      requestID: "preview-inviter-invite",
+      baseRevision: 1,
+      expiresAt: 2_000,
+    },
+    "secret-value-with-at-least-thirty-two-bytes",
+    1_001_000,
+  )) as { token: string };
+
+  assert.deepEqual(
+    await previewInvitation(
+      database.binding,
+      invitation.token,
+      "secret-value-with-at-least-thirty-two-bytes",
+      1_002_000,
+    ),
+    {
+      planID: created.plan.id,
+      planName: "Meet together",
+      comiketNo: 108,
+      expiresAt: "1970-01-01T00:33:20.000Z",
+      inviter: {
+        userID: "00000000000000000000000000000001",
+        displayName: "Inviting Owner",
+        avatarURL: `/join/${invitation.token}/avatar`,
+      },
+    },
   );
 });
 

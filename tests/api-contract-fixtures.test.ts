@@ -327,6 +327,9 @@ test("join capabilities are never cached, referred, or indexed", () => {
   assert.match(source, /Cache-Control", "no-store/);
   assert.match(source, /Referrer-Policy", "no-referrer/);
   assert.match(source, /X-Robots-Tag", "noindex, nofollow, noarchive/);
+  assert.match(source, /invitation\.expiresAt/);
+  assert.match(source, /invitation\.inviter\.displayName/);
+  assert.match(source, /invitation\.inviter\.avatarURL/);
 });
 
 test("provider auth fixture freezes parser-valid Circle, logout, and Apple request DTOs", () => {
