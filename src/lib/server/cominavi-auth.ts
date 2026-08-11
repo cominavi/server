@@ -13,8 +13,14 @@ export interface CirclemsIdentity {
   nickname?: string;
 }
 
-export interface CominaviIdentity extends CirclemsIdentity {
+export interface CominaviIdentity {
+  subject: string;
   userID: number;
+  authVersion: number;
+}
+
+export interface CominaviTokenIdentity {
+  subject: string;
   authVersion: number;
 }
 
@@ -32,9 +38,6 @@ interface CominaviJWTClaims {
   sub: string;
   iat: number;
   exp: number;
-  circlems_environment: CirclemsEnvironment;
-  circlems_user_id: number;
-  user_id: number;
   auth_version: number;
 }
 
@@ -151,9 +154,6 @@ async function issueJWT(
     sub: identity.subject,
     iat: issuedAt,
     exp: issuedAt + appJWTLifetimeSeconds,
-    circlems_environment: identity.circlemsEnvironment,
-    circlems_user_id: identity.circlemsUserID,
-    user_id: identity.userID,
     auth_version: identity.authVersion,
   };
   const header = encodeBase64URL(
@@ -173,15 +173,26 @@ export async function verifyCominaviJWT(
   token: string,
   secret: string,
   nowMilliseconds = Date.now(),
-): Promise<CominaviIdentity> {
-  return verifyJWT(token, secret, nowMilliseconds);
+): Promise<CominaviTokenIdentity> {
+  return verifyJWT(token, secret, nowMilliseconds, false);
+}
+
+/** Signature-only predecessor proof for an exact, payload-bound account
+ * deletion receipt. It must never be used as request authentication. */
+export async function verifyCominaviJWTForDeletionReceipt(
+  token: string,
+  secret: string,
+  nowMilliseconds = Date.now(),
+): Promise<CominaviTokenIdentity> {
+  return verifyJWT(token, secret, nowMilliseconds, true);
 }
 
 async function verifyJWT(
   token: string,
   secret: string,
   nowMilliseconds: number,
-): Promise<CominaviIdentity> {
+  allowExpired: boolean,
+): Promise<CominaviTokenIdentity> {
   assertJWTSecret(secret);
   const parts = token.split(".");
   if (parts.length !== 3 || parts.some((part) => !part)) {
@@ -216,7 +227,7 @@ async function verifyJWT(
   }
   const now = Math.floor(nowMilliseconds / 1_000);
   if (
-    claims.exp <= now ||
+    (!allowExpired && claims.exp <= now) ||
     claims.iat > now + 60 ||
     claims.exp - claims.iat > appJWTLifetimeSeconds
   ) {
@@ -227,16 +238,8 @@ async function verifyJWT(
     );
   }
 
-  const expectedSubject = `circlems:${claims.circlems_environment}:${claims.circlems_user_id}`;
-  if (claims.sub !== expectedSubject) {
-    throw invalidJWT();
-  }
-
   return {
     subject: claims.sub,
-    circlemsEnvironment: claims.circlems_environment,
-    circlemsUserID: claims.circlems_user_id,
-    userID: claims.user_id,
     authVersion: claims.auth_version,
   };
 }
@@ -334,14 +337,9 @@ function isJWTClaims(value: unknown): value is CominaviJWTClaims {
     value.iss === "cominavi.net" &&
     value.aud === "cominavi-ios" &&
     typeof value.sub === "string" &&
+    /^[0-9a-f]{32}$/.test(value.sub) &&
     Number.isSafeInteger(value.iat) &&
     Number.isSafeInteger(value.exp) &&
-    (value.circlems_environment === "production" ||
-      value.circlems_environment === "sandbox") &&
-    Number.isSafeInteger(value.circlems_user_id) &&
-    Number(value.circlems_user_id) > 0 &&
-    Number.isSafeInteger(value.user_id) &&
-    Number(value.user_id) > 0 &&
     Number.isSafeInteger(value.auth_version) &&
     Number(value.auth_version) > 0
   );

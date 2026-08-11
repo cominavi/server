@@ -1,3 +1,20 @@
+import { and, asc, count, eq, inArray, max, sql, type SQL } from "drizzle-orm";
+
+import { runDrizzleBatch } from "../db/batch";
+import { createDatabase } from "../db/client";
+import {
+  circles,
+  circleStateHeads,
+  circleUpdateEvents,
+  circleUpdateTargets,
+  ingestBatches,
+  notificationDeliveries,
+  postMedia,
+  pushDevices,
+  socialPosts,
+  userFavorites,
+  users,
+} from "../db/schema";
 import { ServiceError } from "./service-error";
 
 const encoder = new TextEncoder();
@@ -71,7 +88,7 @@ export interface CrawlerEvent {
   evidence?: unknown;
 }
 
-interface CrawlerBatch {
+export interface CrawlerBatch {
   schemaVersion: 1;
   source: "cominavi-collector";
   observedAt: string;
@@ -84,6 +101,8 @@ export interface CrawlerIngestResult {
   deliveryIDs: number[];
   cursor: number;
 }
+
+type DrizzleBatchStatement = SQL<unknown>;
 
 export async function authenticateCrawlerRequest(
   request: Request,
@@ -201,38 +220,36 @@ export async function ingestCrawlerBatch(
   }
   const now = Math.floor(nowMilliseconds / 1_000);
   const observedAt = requireTimestamp(input.batch.observedAt);
-  const existing = await database
-    .prepare(
-      `SELECT id, payload_sha256
-       FROM ingest_batches
-       WHERE source = ?1 AND idempotency_key = ?2`,
+  const db = createDatabase(database);
+  const existing = await db
+    .select({
+      id: ingestBatches.id,
+      payloadSHA256: ingestBatches.payloadSHA256,
+    })
+    .from(ingestBatches)
+    .where(
+      and(
+        eq(ingestBatches.source, input.batch.source),
+        eq(ingestBatches.idempotencyKey, input.idempotencyKey),
+      ),
     )
-    .bind(input.batch.source, input.idempotencyKey)
-    .first<{ id: number; payload_sha256: string }>();
+    .get();
   if (existing) {
-    if (existing.payload_sha256 !== input.payloadSHA256) {
+    if (existing.payloadSHA256 !== input.payloadSHA256) {
       throw idempotencyConflict();
     }
     return loadIngestResult(database, input.batch, true);
   }
 
-  const statements: D1PreparedStatement[] = [
-    database
-      .prepare(
-        `INSERT OR IGNORE INTO ingest_batches (
-           source, idempotency_key, payload_sha256, schema_version,
-           observed_at, received_at, raw_payload_json
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
-      )
-      .bind(
-        input.batch.source,
-        input.idempotencyKey,
-        input.payloadSHA256,
-        input.batch.schemaVersion,
-        observedAt,
-        now,
-        new TextDecoder().decode(input.rawBody),
-      ),
+  const statements: DrizzleBatchStatement[] = [
+    sql`INSERT OR IGNORE INTO ${ingestBatches} (
+      source, idempotency_key, payload_sha256, schema_version,
+      observed_at, received_at, raw_payload_json
+    ) VALUES (
+      ${input.batch.source}, ${input.idempotencyKey}, ${input.payloadSHA256},
+      ${input.batch.schemaVersion}, ${observedAt}, ${now},
+      ${new TextDecoder().decode(input.rawBody)}
+    )`,
   ];
 
   const events = [...input.batch.events].sort(compareEvents);
@@ -240,77 +257,67 @@ export async function ingestCrawlerBatch(
     const occurredAt = requireTimestamp(event.post.occurredAt);
     for (const circle of event.circles) {
       statements.push(
-        database
-          .prepare(
-            `INSERT INTO circles (
-               comiket_no, wc_id, circle_id, circle_name, pen_name, day,
-               area_name, block_name, space_no, space_no_sub, location,
-               catalog_payload_sha256, catalog_record_json, created_at, updated_at
-             )
-             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14
-             WHERE EXISTS (
-               SELECT 1 FROM ingest_batches
-               WHERE source = ?15 AND idempotency_key = ?16 AND payload_sha256 = ?17
-             )
-             ON CONFLICT(comiket_no, wc_id) DO UPDATE SET
-               circle_id = COALESCE(excluded.circle_id, circles.circle_id),
-               circle_name = CASE WHEN excluded.circle_name <> '' THEN excluded.circle_name ELSE circles.circle_name END,
-               pen_name = CASE WHEN excluded.pen_name <> '' THEN excluded.pen_name ELSE circles.pen_name END,
-               day = COALESCE(excluded.day, circles.day),
-               area_name = COALESCE(excluded.area_name, circles.area_name),
-               block_name = COALESCE(excluded.block_name, circles.block_name),
-               space_no = COALESCE(excluded.space_no, circles.space_no),
-               space_no_sub = COALESCE(excluded.space_no_sub, circles.space_no_sub),
-               location = COALESCE(excluded.location, circles.location),
-               catalog_payload_sha256 = COALESCE(excluded.catalog_payload_sha256, circles.catalog_payload_sha256),
-               catalog_record_json = CASE WHEN excluded.catalog_record_json <> '{}' THEN excluded.catalog_record_json ELSE circles.catalog_record_json END,
-               updated_at = MAX(excluded.updated_at, circles.updated_at)`,
-          )
-          .bind(
-            circle.comiketNo,
-            circle.wcID,
-            circle.circleID ?? null,
-            circle.circleName ?? "",
-            circle.penName ?? "",
-            circle.day ?? null,
-            circle.areaName ?? null,
-            circle.blockName ?? null,
-            circle.spaceNo ?? null,
-            circle.spaceNoSub ?? null,
-            circle.location ?? null,
-            circle.catalogPayloadSHA256 ?? null,
-            JSON.stringify(circle.catalogRecord ?? {}),
-            now,
-            input.batch.source,
-            input.idempotencyKey,
-            input.payloadSHA256,
-          ),
+        sql`INSERT INTO ${circles} (
+          comiket_no, wc_id, circle_id, circle_name, pen_name, day,
+          area_name, block_name, space_no, space_no_sub, location,
+          catalog_payload_sha256, catalog_record_json, created_at, updated_at
+        )
+        SELECT
+          ${circle.comiketNo}, ${circle.wcID}, ${circle.circleID ?? null},
+          ${circle.circleName ?? ""}, ${circle.penName ?? ""}, ${circle.day ?? null},
+          ${circle.areaName ?? null}, ${circle.blockName ?? null},
+          ${circle.spaceNo ?? null}, ${circle.spaceNoSub ?? null},
+          ${circle.location ?? null}, ${circle.catalogPayloadSHA256 ?? null},
+          ${JSON.stringify(circle.catalogRecord ?? {})}, ${now}, ${now}
+        WHERE EXISTS (
+          SELECT 1 FROM ${ingestBatches}
+          WHERE ${ingestBatches.source} = ${input.batch.source}
+            AND ${ingestBatches.idempotencyKey} = ${input.idempotencyKey}
+            AND ${ingestBatches.payloadSHA256} = ${input.payloadSHA256}
+        )
+        ON CONFLICT(comiket_no, wc_id) DO UPDATE SET
+          circle_id = COALESCE(excluded.circle_id, ${circles.circleID}),
+          circle_name = CASE WHEN excluded.circle_name <> '' THEN excluded.circle_name ELSE ${circles.circleName} END,
+          pen_name = CASE WHEN excluded.pen_name <> '' THEN excluded.pen_name ELSE ${circles.penName} END,
+          day = COALESCE(excluded.day, ${circles.day}),
+          area_name = COALESCE(excluded.area_name, ${circles.areaName}),
+          block_name = COALESCE(excluded.block_name, ${circles.blockName}),
+          space_no = COALESCE(excluded.space_no, ${circles.spaceNo}),
+          space_no_sub = COALESCE(excluded.space_no_sub, ${circles.spaceNoSub}),
+          location = COALESCE(excluded.location, ${circles.location}),
+          catalog_payload_sha256 = COALESCE(excluded.catalog_payload_sha256, ${circles.catalogPayloadSHA256}),
+          catalog_record_json = CASE WHEN excluded.catalog_record_json <> '{}' THEN excluded.catalog_record_json ELSE ${circles.catalogRecordJSON} END,
+          updated_at = MAX(excluded.updated_at, ${circles.updatedAt})`,
       );
     }
-    statements.push(
-      postStatement(database, event, observedAt, occurredAt, input),
-    );
+    statements.push(postStatement(event, observedAt, occurredAt, input));
     for (const [index, media] of event.post.media.entries()) {
-      statements.push(mediaStatement(database, event, media, index, input));
+      statements.push(mediaStatement(event, media, index, input));
     }
-    statements.push(eventStatement(database, event, occurredAt, now, input));
+    statements.push(eventStatement(event, occurredAt, now, input));
     for (const circle of event.circles) {
-      statements.push(targetStatement(database, event, circle));
+      statements.push(targetStatement(event, circle));
     }
-    statements.push(deliveryStatement(database, event, now));
-    statements.push(headStatement(database, event, now));
+    statements.push(deliveryStatement(event, now));
+    statements.push(headStatement(event, now));
   }
 
-  const results = await database.batch(statements);
+  const results = await runDrizzleBatch(
+    database,
+    statements as [DrizzleBatchStatement, ...DrizzleBatchStatement[]],
+  );
   if ((results[0]?.meta.changes ?? 0) !== 1) {
-    const raced = await database
-      .prepare(
-        `SELECT payload_sha256 FROM ingest_batches
-         WHERE source = ?1 AND idempotency_key = ?2`,
+    const raced = await db
+      .select({ payloadSHA256: ingestBatches.payloadSHA256 })
+      .from(ingestBatches)
+      .where(
+        and(
+          eq(ingestBatches.source, input.batch.source),
+          eq(ingestBatches.idempotencyKey, input.idempotencyKey),
+        ),
       )
-      .bind(input.batch.source, input.idempotencyKey)
-      .first<{ payload_sha256: string }>();
-    if (!raced || raced.payload_sha256 !== input.payloadSHA256) {
+      .get();
+    if (!raced || raced.payloadSHA256 !== input.payloadSHA256) {
       throw idempotencyConflict();
     }
   }
@@ -322,259 +329,213 @@ async function loadIngestResult(
   batch: CrawlerBatch,
   duplicate: boolean,
 ): Promise<CrawlerIngestResult> {
-  const eventKeys = JSON.stringify(batch.events.map((event) => event.eventKey));
+  const db = createDatabase(database);
+  const eventKeys = batch.events.map((event) => event.eventKey);
+  const matchesBatch =
+    eventKeys.length > 0
+      ? inArray(circleUpdateEvents.eventKey, eventKeys)
+      : sql<boolean>`false`;
   const [events, deliveries, cursor] = await Promise.all([
-    database
-      .prepare(
-        `SELECT count(*) AS count
-         FROM circle_update_events
-         WHERE event_key IN (SELECT value FROM json_each(?1))`,
+    db
+      .select({ count: count() })
+      .from(circleUpdateEvents)
+      .where(matchesBatch)
+      .get(),
+    db
+      .select({ id: notificationDeliveries.id })
+      .from(notificationDeliveries)
+      .innerJoin(
+        circleUpdateEvents,
+        eq(circleUpdateEvents.id, notificationDeliveries.updateEventID),
       )
-      .bind(eventKeys)
-      .first<{ count: number }>(),
-    database
-      .prepare(
-        `SELECT delivery.id
-         FROM notification_deliveries AS delivery
-         JOIN circle_update_events AS event
-           ON event.id = delivery.update_event_id
-         WHERE event.event_key IN (SELECT value FROM json_each(?1))
-           AND delivery.status IN ('pending', 'retry')
-         ORDER BY delivery.id`,
+      .where(
+        and(
+          matchesBatch,
+          inArray(notificationDeliveries.status, ["pending", "retry"]),
+        ),
       )
-      .bind(eventKeys)
-      .all<{ id: number }>(),
-    database
-      .prepare(
-        `SELECT COALESCE(max(id), 0) AS cursor FROM circle_update_events`,
-      )
-      .first<{ cursor: number }>(),
+      .orderBy(asc(notificationDeliveries.id)),
+    db
+      .select({
+        cursor: sql<number>`COALESCE(${max(circleUpdateEvents.id)}, 0)`,
+      })
+      .from(circleUpdateEvents)
+      .get(),
   ]);
   return {
     duplicate,
     acceptedEvents: events?.count ?? 0,
-    deliveryIDs: deliveries.results.map((row) => row.id),
+    deliveryIDs: deliveries.map((row) => row.id),
     cursor: cursor?.cursor ?? 0,
   };
 }
 
 function postStatement(
-  database: D1Database,
   event: CrawlerEvent,
   observedAt: number,
   occurredAt: number,
   input: Parameters<typeof ingestCrawlerBatch>[1],
-): D1PreparedStatement {
+): DrizzleBatchStatement {
   const post = event.post;
-  return database
-    .prepare(
-      `INSERT INTO social_posts (
-         post_id, author_x_user_id, author_handle, author_name,
-         author_profile_image_url, post_url, text, occurred_at,
-         latest_observed_at, raw_post_json
-       )
-       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
-       WHERE EXISTS (
-         SELECT 1 FROM ingest_batches
-         WHERE source = ?11 AND idempotency_key = ?12 AND payload_sha256 = ?13
-       )
-       ON CONFLICT(post_id) DO UPDATE SET
-         author_x_user_id = excluded.author_x_user_id,
-         author_handle = excluded.author_handle,
-         author_name = excluded.author_name,
-         author_profile_image_url = excluded.author_profile_image_url,
-         post_url = excluded.post_url,
-         text = excluded.text,
-         occurred_at = excluded.occurred_at,
-         latest_observed_at = excluded.latest_observed_at,
-         raw_post_json = excluded.raw_post_json
-       WHERE excluded.latest_observed_at >= social_posts.latest_observed_at`,
-    )
-    .bind(
-      post.id,
-      post.author.xUserID ?? null,
-      post.author.handle,
-      post.author.name ?? null,
-      post.author.profileImageURL ?? null,
-      post.url ?? null,
-      post.text,
-      occurredAt,
-      observedAt,
-      JSON.stringify(post.raw ?? post),
-      input.batch.source,
-      input.idempotencyKey,
-      input.payloadSHA256,
-    );
+  return sql`INSERT INTO ${socialPosts} (
+    post_id, author_x_user_id, author_handle, author_name,
+    author_profile_image_url, post_url, text, occurred_at,
+    latest_observed_at, raw_post_json
+  )
+  SELECT
+    ${post.id}, ${post.author.xUserID ?? null}, ${post.author.handle},
+    ${post.author.name ?? null}, ${post.author.profileImageURL ?? null},
+    ${post.url ?? null}, ${post.text}, ${occurredAt}, ${observedAt},
+    ${JSON.stringify(post.raw ?? post)}
+  WHERE EXISTS (
+    SELECT 1 FROM ${ingestBatches}
+    WHERE ${ingestBatches.source} = ${input.batch.source}
+      AND ${ingestBatches.idempotencyKey} = ${input.idempotencyKey}
+      AND ${ingestBatches.payloadSHA256} = ${input.payloadSHA256}
+  )
+  ON CONFLICT(post_id) DO UPDATE SET
+    author_x_user_id = excluded.author_x_user_id,
+    author_handle = excluded.author_handle,
+    author_name = excluded.author_name,
+    author_profile_image_url = excluded.author_profile_image_url,
+    post_url = excluded.post_url,
+    text = excluded.text,
+    occurred_at = excluded.occurred_at,
+    latest_observed_at = excluded.latest_observed_at,
+    raw_post_json = excluded.raw_post_json
+  WHERE excluded.latest_observed_at >= ${socialPosts.latestObservedAt}`;
 }
 
 function mediaStatement(
-  database: D1Database,
   event: CrawlerEvent,
   media: CrawlerMedia,
   index: number,
   input: Parameters<typeof ingestCrawlerBatch>[1],
-): D1PreparedStatement {
-  return database
-    .prepare(
-      `INSERT INTO post_media (
-         post_id, media_index, media_key, media_type, role, url,
-         preview_url, width, height, palette_json, payload_sha256
-       )
-       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
-       WHERE EXISTS (
-         SELECT 1 FROM ingest_batches
-         WHERE source = ?12 AND idempotency_key = ?13 AND payload_sha256 = ?14
-       )
-       ON CONFLICT(post_id, media_key) DO UPDATE SET
-         media_index = excluded.media_index,
-         media_type = excluded.media_type,
-         role = excluded.role,
-         url = excluded.url,
-         preview_url = excluded.preview_url,
-         width = excluded.width,
-         height = excluded.height,
-         palette_json = excluded.palette_json,
-         payload_sha256 = excluded.payload_sha256`,
-    )
-    .bind(
-      event.post.id,
-      index,
-      media.key,
-      media.type,
-      media.role,
-      media.url,
-      media.previewURL ?? null,
-      media.width ?? null,
-      media.height ?? null,
-      media.palette === undefined ? null : JSON.stringify(media.palette),
-      media.payloadSHA256 ?? null,
-      input.batch.source,
-      input.idempotencyKey,
-      input.payloadSHA256,
-    );
+): DrizzleBatchStatement {
+  return sql`INSERT INTO ${postMedia} (
+    post_id, media_index, media_key, media_type, role, url,
+    preview_url, width, height, palette_json, payload_sha256
+  )
+  SELECT
+    ${event.post.id}, ${index}, ${media.key}, ${media.type}, ${media.role},
+    ${media.url}, ${media.previewURL ?? null}, ${media.width ?? null},
+    ${media.height ?? null},
+    ${media.palette === undefined ? null : JSON.stringify(media.palette)},
+    ${media.payloadSHA256 ?? null}
+  WHERE EXISTS (
+    SELECT 1 FROM ${ingestBatches}
+    WHERE ${ingestBatches.source} = ${input.batch.source}
+      AND ${ingestBatches.idempotencyKey} = ${input.idempotencyKey}
+      AND ${ingestBatches.payloadSHA256} = ${input.payloadSHA256}
+  )
+  ON CONFLICT(post_id, media_key) DO UPDATE SET
+    media_index = excluded.media_index,
+    media_type = excluded.media_type,
+    role = excluded.role,
+    url = excluded.url,
+    preview_url = excluded.preview_url,
+    width = excluded.width,
+    height = excluded.height,
+    palette_json = excluded.palette_json,
+    payload_sha256 = excluded.payload_sha256`;
 }
 
 function eventStatement(
-  database: D1Database,
   event: CrawlerEvent,
   occurredAt: number,
   now: number,
   input: Parameters<typeof ingestCrawlerBatch>[1],
-): D1PreparedStatement {
-  return database
-    .prepare(
-      `INSERT OR IGNORE INTO circle_update_events (
-         event_key, ingest_batch_id, source, source_revision, post_id,
-         update_kind, state_kind, state_value, confidence, occurred_at,
-         notifiable, evidence_json, created_at
-       )
-       SELECT ?1, batch.id, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
-       FROM ingest_batches AS batch
-       WHERE batch.source = ?2 AND batch.idempotency_key = ?13
-         AND batch.payload_sha256 = ?14`,
-    )
-    .bind(
-      event.eventKey,
-      input.batch.source,
-      event.sourceRevision,
-      event.post.id,
-      event.updateKind,
-      event.stateKind,
-      event.stateValue,
-      event.confidence,
-      occurredAt,
-      event.notifiable ? 1 : 0,
-      JSON.stringify(event.evidence ?? {}),
-      now,
-      input.idempotencyKey,
-      input.payloadSHA256,
-    );
+): DrizzleBatchStatement {
+  return sql`INSERT OR IGNORE INTO ${circleUpdateEvents} (
+    event_key, ingest_batch_id, source, source_revision, post_id,
+    update_kind, state_kind, state_value, confidence, occurred_at,
+    notifiable, evidence_json, created_at
+  )
+  SELECT
+    ${event.eventKey}, ${ingestBatches.id}, ${input.batch.source},
+    ${event.sourceRevision}, ${event.post.id}, ${event.updateKind},
+    ${event.stateKind}, ${event.stateValue}, ${event.confidence},
+    ${occurredAt}, ${event.notifiable ? 1 : 0},
+    ${JSON.stringify(event.evidence ?? {})}, ${now}
+  FROM ${ingestBatches}
+  WHERE ${ingestBatches.source} = ${input.batch.source}
+    AND ${ingestBatches.idempotencyKey} = ${input.idempotencyKey}
+    AND ${ingestBatches.payloadSHA256} = ${input.payloadSHA256}`;
 }
 
 function targetStatement(
-  database: D1Database,
   event: CrawlerEvent,
   circle: CrawlerCircle,
-): D1PreparedStatement {
-  return database
-    .prepare(
-      `INSERT OR IGNORE INTO circle_update_targets
-         (update_event_id, comiket_no, wc_id)
-       SELECT id, ?2, ?3 FROM circle_update_events WHERE event_key = ?1`,
-    )
-    .bind(event.eventKey, circle.comiketNo, circle.wcID);
+): DrizzleBatchStatement {
+  return sql`INSERT OR IGNORE INTO ${circleUpdateTargets}
+    (update_event_id, comiket_no, wc_id)
+  SELECT ${circleUpdateEvents.id}, ${circle.comiketNo}, ${circle.wcID}
+  FROM ${circleUpdateEvents}
+  WHERE ${circleUpdateEvents.eventKey} = ${event.eventKey}`;
 }
 
 function deliveryStatement(
-  database: D1Database,
   event: CrawlerEvent,
   now: number,
-): D1PreparedStatement {
-  return database
-    .prepare(
-      `INSERT OR IGNORE INTO notification_deliveries (
-         update_event_id, user_id, device_id, status, attempt_count,
-         available_at, created_at, updated_at
-       )
-       SELECT DISTINCT event.id, favorite.user_id, device.id,
-              'pending', 0, ?2, ?2, ?2
-       FROM circle_update_events AS event
-       JOIN circle_update_targets AS target
-         ON target.update_event_id = event.id
-       JOIN user_favorites AS favorite
-         ON favorite.comiket_no = target.comiket_no
-        AND favorite.wc_id = target.wc_id
-        AND favorite.active = 1
-        AND favorite.notifications_enabled = 1
-       JOIN push_devices AS device
-         ON device.user_id = favorite.user_id AND device.enabled = 1
-       LEFT JOIN circle_state_heads AS head
-         ON head.comiket_no = target.comiket_no
-        AND head.wc_id = target.wc_id
-        AND head.state_kind = event.state_kind
-       WHERE event.event_key = ?1 AND event.notifiable = 1
-         AND (head.update_event_id IS NULL OR
-              event.occurred_at > head.occurred_at OR
-              (event.occurred_at = head.occurred_at AND event.source_revision > head.source_revision) OR
-              (event.occurred_at = head.occurred_at AND event.source_revision = head.source_revision
-               AND event.event_key > head.event_key))
-         AND (head.update_event_id IS NULL OR head.state_value <> event.state_value)`,
-    )
-    .bind(event.eventKey, now);
+): DrizzleBatchStatement {
+  return sql`INSERT OR IGNORE INTO ${notificationDeliveries} (
+    update_event_id, user_id, device_id, status, attempt_count,
+    available_at, created_at, updated_at
+  )
+  SELECT DISTINCT event.id, favorite.user_id, device.id,
+    'pending', 0, ${now}, ${now}, ${now}
+  FROM ${circleUpdateEvents} AS event
+  JOIN ${circleUpdateTargets} AS target
+    ON target.update_event_id = event.id
+  JOIN ${userFavorites} AS favorite
+    ON favorite.comiket_no = target.comiket_no
+   AND favorite.wc_id = target.wc_id
+   AND favorite.active = 1
+   AND favorite.notifications_enabled = 1
+  JOIN ${pushDevices} AS device
+    ON device.user_id = favorite.user_id AND device.enabled = 1
+  JOIN ${users} AS user ON user.id = favorite.user_id
+  LEFT JOIN ${circleStateHeads} AS head
+    ON head.comiket_no = target.comiket_no
+   AND head.wc_id = target.wc_id
+   AND head.state_kind = event.state_kind
+  WHERE event.event_key = ${event.eventKey} AND event.notifiable = 1
+    AND user.deletion_pending_at IS NULL
+    AND (head.update_event_id IS NULL OR
+         event.occurred_at > head.occurred_at OR
+         (event.occurred_at = head.occurred_at AND event.source_revision > head.source_revision) OR
+         (event.occurred_at = head.occurred_at AND event.source_revision = head.source_revision
+          AND event.event_key > head.event_key))
+    AND (head.update_event_id IS NULL OR head.state_value <> event.state_value)`;
 }
 
 function headStatement(
-  database: D1Database,
   event: CrawlerEvent,
   now: number,
-): D1PreparedStatement {
-  return database
-    .prepare(
-      `INSERT INTO circle_state_heads (
-         comiket_no, wc_id, state_kind, state_value, occurred_at,
-         source_revision, event_key, update_event_id, updated_at
-       )
-       SELECT target.comiket_no, target.wc_id, event.state_kind,
-              event.state_value, event.occurred_at, event.source_revision,
-              event.event_key, event.id, ?2
-       FROM circle_update_events AS event
-       JOIN circle_update_targets AS target ON target.update_event_id = event.id
-       WHERE event.event_key = ?1
-       ON CONFLICT(comiket_no, wc_id, state_kind) DO UPDATE SET
-         state_value = excluded.state_value,
-         occurred_at = excluded.occurred_at,
-         source_revision = excluded.source_revision,
-         event_key = excluded.event_key,
-         update_event_id = excluded.update_event_id,
-         updated_at = excluded.updated_at
-       WHERE excluded.occurred_at > circle_state_heads.occurred_at OR
-             (excluded.occurred_at = circle_state_heads.occurred_at
-              AND excluded.source_revision > circle_state_heads.source_revision) OR
-             (excluded.occurred_at = circle_state_heads.occurred_at
-              AND excluded.source_revision = circle_state_heads.source_revision
-              AND excluded.event_key > circle_state_heads.event_key)`,
-    )
-    .bind(event.eventKey, now);
+): DrizzleBatchStatement {
+  return sql`INSERT INTO ${circleStateHeads} (
+    comiket_no, wc_id, state_kind, state_value, occurred_at,
+    source_revision, event_key, update_event_id, updated_at
+  )
+  SELECT target.comiket_no, target.wc_id, event.state_kind,
+    event.state_value, event.occurred_at, event.source_revision,
+    event.event_key, event.id, ${now}
+  FROM ${circleUpdateEvents} AS event
+  JOIN ${circleUpdateTargets} AS target ON target.update_event_id = event.id
+  WHERE event.event_key = ${event.eventKey}
+  ON CONFLICT(comiket_no, wc_id, state_kind) DO UPDATE SET
+    state_value = excluded.state_value,
+    occurred_at = excluded.occurred_at,
+    source_revision = excluded.source_revision,
+    event_key = excluded.event_key,
+    update_event_id = excluded.update_event_id,
+    updated_at = excluded.updated_at
+  WHERE excluded.occurred_at > ${circleStateHeads.occurredAt} OR
+    (excluded.occurred_at = ${circleStateHeads.occurredAt}
+     AND excluded.source_revision > ${circleStateHeads.sourceRevision}) OR
+    (excluded.occurred_at = ${circleStateHeads.occurredAt}
+     AND excluded.source_revision = ${circleStateHeads.sourceRevision}
+     AND excluded.event_key > ${circleStateHeads.eventKey})`;
 }
 
 function parseEvent(value: unknown): CrawlerEvent {

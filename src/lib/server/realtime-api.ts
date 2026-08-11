@@ -1,23 +1,33 @@
+import { and, eq, exists, gt, inArray, sql } from "drizzle-orm";
+
+import {
+  circles,
+  circleUpdateEvents,
+  circleUpdateTargets,
+  postMedia,
+  socialPosts,
+} from "../db/schema";
+import { createDatabase } from "../db/client";
 import { ServiceError } from "./service-error";
 
 interface UpdateRow {
   id: number;
-  event_key: string;
-  update_kind: string;
-  state_kind: string;
-  state_value: string;
+  eventKey: string;
+  updateKind: string;
+  stateKind: string;
+  stateValue: string;
   confidence: string;
-  occurred_at: number;
-  source_revision: number;
-  post_id: string;
-  post_url: string | null;
+  occurredAt: number;
+  sourceRevision: number;
+  postID: string;
+  postURL: string | null;
   text: string;
-  author_x_user_id: string | null;
-  author_handle: string;
-  author_name: string | null;
-  author_profile_image_url: string | null;
-  targets_json: string;
-  media_json: string;
+  authorXUserID: string | null;
+  authorHandle: string;
+  authorName: string | null;
+  authorProfileImageURL: string | null;
+  targetsJSON: string;
+  mediaJSON: string;
 }
 
 export interface RealtimeQuery {
@@ -63,98 +73,108 @@ export async function loadRealtimeUpdates(
   hasMore: boolean;
   serverTime: string;
 }> {
-  const wcIDsJSON = JSON.stringify(query.wcIDs);
-  const rows = await database
-    .prepare(
-      `SELECT event.id, event.event_key, event.update_kind, event.state_kind,
-              event.state_value, event.confidence, event.occurred_at,
-              event.source_revision, post.post_id, post.post_url, post.text,
-              post.author_x_user_id, post.author_handle, post.author_name,
-              post.author_profile_image_url,
-              COALESCE((
-                SELECT json_group_array(json_object(
-                  'eventNumber', target.comiket_no,
-                  'wcID', target.wc_id,
-                  'circleID', circle.circle_id,
-                  'circleName', circle.circle_name,
-                  'day', circle.day,
-                  'areaName', circle.area_name,
-                  'blockName', circle.block_name,
-                  'spaceNo', circle.space_no,
-                  'spaceNoSub', circle.space_no_sub,
-                  'location', circle.location
-                ))
-                FROM circle_update_targets AS target
-                JOIN circles AS circle
-                  ON circle.comiket_no = target.comiket_no
-                 AND circle.wc_id = target.wc_id
-                WHERE target.update_event_id = event.id
-                  AND target.comiket_no = ?1
-              ), '[]') AS targets_json,
-              COALESCE((
-                SELECT json_group_array(json_object(
-                  'key', media.media_key,
-                  'type', media.media_type,
-                  'role', media.role,
-                  'url', media.url,
-                  'previewURL', media.preview_url,
-                  'width', media.width,
-                  'height', media.height,
-                  'palette', json(media.palette_json),
-                  'payloadSHA256', media.payload_sha256
-                ))
-                FROM post_media AS media
-                WHERE media.post_id = event.post_id
-              ), '[]') AS media_json
-       FROM circle_update_events AS event
-       JOIN social_posts AS post ON post.post_id = event.post_id
-       WHERE event.id > ?2
-         AND EXISTS (
-           SELECT 1 FROM circle_update_targets AS event_target
-           WHERE event_target.update_event_id = event.id
-             AND event_target.comiket_no = ?1
-             AND (?3 = 0 OR event_target.wc_id IN (
-               SELECT CAST(value AS INTEGER) FROM json_each(?4)
-             ))
-         )
-       ORDER BY event.id
-       LIMIT ?5`,
-    )
-    .bind(
-      eventNumber,
-      query.after,
-      query.wcIDs.length,
-      wcIDsJSON,
-      query.limit + 1,
-    )
-    .all<UpdateRow>();
+  const db = createDatabase(database);
+  const matchingTarget = db
+    .select({ value: sql<number>`1` })
+    .from(circleUpdateTargets)
+    .where(
+      and(
+        eq(circleUpdateTargets.updateEventID, circleUpdateEvents.id),
+        eq(circleUpdateTargets.comiketNo, eventNumber),
+        query.wcIDs.length > 0
+          ? inArray(circleUpdateTargets.wcID, query.wcIDs)
+          : undefined,
+      ),
+    );
+  // SQLite's JSON aggregate remains an intentional SQL expression, while
+  // every table, column, predicate, join, and bound value stays Drizzle-owned.
+  const targetsJSON = sql<string>`COALESCE((
+    SELECT json_group_array(json_object(
+      'eventNumber', ${circleUpdateTargets.comiketNo},
+      'wcID', ${circleUpdateTargets.wcID},
+      'circleID', ${circles.circleID},
+      'circleName', ${circles.circleName},
+      'day', ${circles.day},
+      'areaName', ${circles.areaName},
+      'blockName', ${circles.blockName},
+      'spaceNo', ${circles.spaceNo},
+      'spaceNoSub', ${circles.spaceNoSub},
+      'location', ${circles.location}
+    ))
+    FROM ${circleUpdateTargets}
+    JOIN ${circles}
+      ON ${circles.comiketNo} = ${circleUpdateTargets.comiketNo}
+     AND ${circles.wcID} = ${circleUpdateTargets.wcID}
+    WHERE ${circleUpdateTargets.updateEventID} = ${circleUpdateEvents.id}
+      AND ${circleUpdateTargets.comiketNo} = ${eventNumber}
+  ), '[]')`;
+  const mediaJSON = sql<string>`COALESCE((
+    SELECT json_group_array(json_object(
+      'key', ${postMedia.mediaKey},
+      'type', ${postMedia.mediaType},
+      'role', ${postMedia.role},
+      'url', ${postMedia.url},
+      'previewURL', ${postMedia.previewURL},
+      'width', ${postMedia.width},
+      'height', ${postMedia.height},
+      'palette', json(${postMedia.paletteJSON}),
+      'payloadSHA256', ${postMedia.payloadSHA256}
+    ))
+    FROM ${postMedia}
+    WHERE ${postMedia.postID} = ${circleUpdateEvents.postID}
+  ), '[]')`;
+  const rows: UpdateRow[] = await db
+    .select({
+      id: circleUpdateEvents.id,
+      eventKey: circleUpdateEvents.eventKey,
+      updateKind: circleUpdateEvents.updateKind,
+      stateKind: circleUpdateEvents.stateKind,
+      stateValue: circleUpdateEvents.stateValue,
+      confidence: circleUpdateEvents.confidence,
+      occurredAt: circleUpdateEvents.occurredAt,
+      sourceRevision: circleUpdateEvents.sourceRevision,
+      postID: socialPosts.postID,
+      postURL: socialPosts.postURL,
+      text: socialPosts.text,
+      authorXUserID: socialPosts.authorXUserID,
+      authorHandle: socialPosts.authorHandle,
+      authorName: socialPosts.authorName,
+      authorProfileImageURL: socialPosts.authorProfileImageURL,
+      targetsJSON,
+      mediaJSON,
+    })
+    .from(circleUpdateEvents)
+    .innerJoin(socialPosts, eq(socialPosts.postID, circleUpdateEvents.postID))
+    .where(and(gt(circleUpdateEvents.id, query.after), exists(matchingTarget)))
+    .orderBy(circleUpdateEvents.id)
+    .limit(query.limit + 1);
 
-  const hasMore = rows.results.length > query.limit;
-  const page = rows.results.slice(0, query.limit);
+  const hasMore = rows.length > query.limit;
+  const page = rows.slice(0, query.limit);
   return {
     eventNumber,
     updates: page.map((row) => ({
       cursor: row.id,
-      eventKey: row.event_key,
-      updateKind: row.update_kind,
-      stateKind: row.state_kind,
-      stateValue: row.state_value,
+      eventKey: row.eventKey,
+      updateKind: row.updateKind,
+      stateKind: row.stateKind,
+      stateValue: row.stateValue,
       confidence: row.confidence,
-      occurredAt: new Date(row.occurred_at * 1_000).toISOString(),
-      sourceRevision: row.source_revision,
+      occurredAt: new Date(row.occurredAt * 1_000).toISOString(),
+      sourceRevision: row.sourceRevision,
       post: {
-        id: row.post_id,
-        url: row.post_url,
+        id: row.postID,
+        url: row.postURL,
         text: row.text,
         author: {
-          xUserID: row.author_x_user_id,
-          handle: row.author_handle,
-          name: row.author_name,
-          profileImageURL: row.author_profile_image_url,
+          xUserID: row.authorXUserID,
+          handle: row.authorHandle,
+          name: row.authorName,
+          profileImageURL: row.authorProfileImageURL,
         },
-        media: parseJSONArray(row.media_json),
+        media: parseJSONArray(row.mediaJSON),
       },
-      circles: parseJSONArray(row.targets_json),
+      circles: parseJSONArray(row.targetsJSON),
     })),
     nextCursor: page.at(-1)?.id ?? query.after,
     hasMore,

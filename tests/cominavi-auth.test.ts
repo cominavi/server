@@ -11,17 +11,23 @@ import {
 
 const secret = "a-development-only-secret-that-is-long-enough";
 const identity: CominaviIdentity = {
-  subject: "circlems:production:42",
-  circlemsEnvironment: "production",
-  circlemsUserID: 42,
+  subject: "0123456789abcdef0123456789abcdef",
   userID: 7,
   authVersion: 1,
 };
 
-test("ComiNavi JWT round-trips a verified Circle.ms identity", async () => {
+test("ComiNavi JWT carries only provider-neutral public identity and auth epoch", async () => {
   const issued = await issueCominaviJWT(identity, secret, 1_000_000);
   const verified = await verifyCominaviJWT(issued.token, secret, 1_001_000);
-  assert.deepEqual(verified, identity);
+  assert.deepEqual(verified, {
+    subject: identity.subject,
+    authVersion: identity.authVersion,
+  });
+  const claims = JSON.parse(
+    Buffer.from(issued.token.split(".")[1] ?? "", "base64url").toString("utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(claims.sub, identity.subject);
+  assert.equal("user_id" in claims, false);
   assert.equal(
     issued.expiresAt,
     new Date((1_000 + 15 * 60) * 1_000).toISOString(),
@@ -66,9 +72,9 @@ test("Circle.ms authentication validates the bearer token against User Info", as
   assert.equal(request?.url, "https://api1.circle.ms/User/Info");
   assert.equal(request?.headers.get("Authorization"), "Bearer circle-token");
   assert.deepEqual(result, {
-    subject: identity.subject,
-    circlemsEnvironment: identity.circlemsEnvironment,
-    circlemsUserID: identity.circlemsUserID,
+    subject: "circlems:production:42",
+    circlemsEnvironment: "production",
+    circlemsUserID: 42,
     nickname: "Galvin",
   });
 });

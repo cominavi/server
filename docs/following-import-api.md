@@ -1,27 +1,23 @@
 # X following import API
 
-The native app authenticates with its existing Circle.ms session, receives a short-lived ComiNavi token, and asks the backend to fetch the public accounts followed by one X account. Catalog matching stays on the device: the backend never receives the user's local catalog or circle matches.
+The native app completes the backend-owned Circle.ms OAuth flow, receives a
+short-lived ComiNavi access token plus a rotating refresh token, and asks the
+backend to fetch the public accounts followed by one X account. Catalog matching
+stays on the device: the backend never receives the user's local catalog or
+circle matches.
 
 ## Endpoints
 
-### `POST /api/v1/auth/circlems`
+### `POST /api/v2/auth/circlems/start` and `/complete`
 
-Headers:
+The start operation binds the environment, client instance, request ID, and PKCE
+challenge before returning the Circle.ms authorization URL. The complete
+operation accepts only the short-lived completion code and PKCE verifier. It
+returns a ComiNavi session; Circle.ms access and refresh credentials remain
+encrypted on the backend. See the generated OpenAPI document at
+`/api/openapi.json` for the typed request and response schemas.
 
-```text
-Authorization: Bearer <Circle.ms access token>
-Content-Type: application/json
-```
-
-Body:
-
-```json
-{ "environment": "production" }
-```
-
-`environment` is `production` or `sandbox`. The endpoint validates the bearer token with Circle.ms `/User/Info` and returns a 15-minute HS256 JWT scoped to the verified Circle.ms user.
-
-### `POST /api/v1/imports/x-followings`
+### `POST /api/v2/imports/x-followings`
 
 Headers:
 

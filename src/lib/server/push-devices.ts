@@ -1,5 +1,12 @@
-import type { CominaviIdentity } from "./cominavi-auth";
+import { AuthenticationError, type CominaviIdentity } from "./cominavi-auth";
+import { sql } from "drizzle-orm";
+import { runDrizzleBatch } from "../db/batch";
+import { createDatabase } from "../db/client";
+import { pushDevices, users } from "../db/schema";
 import { ServiceError } from "./service-error";
+
+const maximumEnabledPushDevicesPerUser = 10;
+const maximumRetainedPushDevicesPerUser = 20;
 
 interface DeviceRegistration {
   token: string;
@@ -64,28 +71,35 @@ export async function registerPushDevice(
 ): Promise<{ installationID: string; enabled: boolean }> {
   const now = Math.floor(nowMilliseconds / 1_000);
   const tokenSHA256 = await sha256Hex(registration.token);
-  await database.batch([
-    database
-      .prepare(
-        `DELETE FROM push_devices
-         WHERE apns_environment = ?1 AND bundle_id = ?2
-           AND token_sha256 = ?3
-           AND (user_id <> ?4 OR installation_id <> ?5)`,
-      )
-      .bind(
-        registration.apnsEnvironment,
-        registration.bundleID,
-        tokenSHA256,
-        identity.userID,
-        installationID,
-      ),
-    database
-      .prepare(
-        `INSERT INTO push_devices (
+  const results = await runDrizzleBatch(database, [
+    sql`
+        DELETE FROM ${pushDevices}
+         WHERE ${pushDevices.apnsEnvironment} = ${registration.apnsEnvironment}
+           AND ${pushDevices.bundleID} = ${registration.bundleID}
+           AND ${pushDevices.tokenSHA256} = ${tokenSHA256}
+           AND (${pushDevices.userID} <> ${identity.userID}
+             OR ${pushDevices.installationID} <> ${installationID})
+           AND EXISTS (
+             SELECT 1 FROM ${users}
+             WHERE ${users.id} = ${identity.userID}
+               AND ${users.authVersion} = ${identity.authVersion}
+               AND ${users.deletionPendingAt} IS NULL
+           )`,
+    sql`
+        INSERT INTO ${pushDevices} (
            user_id, installation_id, token, token_sha256, apns_environment,
            bundle_id, locale, time_zone, enabled, created_at, updated_at,
            last_registered_at, invalidated_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, ?10, NULL)
+         )
+         SELECT ${identity.userID}, ${installationID}, ${registration.token},
+                ${tokenSHA256}, ${registration.apnsEnvironment},
+                ${registration.bundleID}, ${registration.locale ?? null},
+                ${registration.timeZone ?? null},
+                ${registration.enabled ? 1 : 0}, ${now}, ${now}, ${now}, NULL
+         FROM ${users}
+         WHERE ${users.id} = ${identity.userID}
+           AND ${users.authVersion} = ${identity.authVersion}
+           AND ${users.deletionPendingAt} IS NULL
          ON CONFLICT(user_id, installation_id) DO UPDATE SET
            token = excluded.token,
            token_sha256 = excluded.token_sha256,
@@ -97,20 +111,62 @@ export async function registerPushDevice(
            updated_at = excluded.updated_at,
            last_registered_at = excluded.last_registered_at,
            invalidated_at = NULL`,
-      )
-      .bind(
-        identity.userID,
-        installationID,
-        registration.token,
-        tokenSHA256,
-        registration.apnsEnvironment,
-        registration.bundleID,
-        registration.locale ?? null,
-        registration.timeZone ?? null,
-        registration.enabled ? 1 : 0,
-        now,
-      ),
+    sql`
+        UPDATE ${pushDevices}
+         SET enabled = 0,
+             invalidated_at = COALESCE(invalidated_at, ${now}),
+             updated_at = ${now}
+         WHERE user_id = ${identity.userID} AND enabled = 1 AND id NOT IN (
+           SELECT id FROM ${pushDevices}
+           WHERE user_id = ${identity.userID} AND enabled = 1
+           ORDER BY CASE WHEN installation_id = ${installationID} THEN 0 ELSE 1 END,
+                    last_registered_at DESC, updated_at DESC, created_at DESC, id DESC
+           LIMIT ${maximumEnabledPushDevicesPerUser}
+         )
+           AND EXISTS (
+             SELECT 1 FROM ${users}
+             WHERE ${users.id} = ${identity.userID}
+               AND ${users.authVersion} = ${identity.authVersion}
+               AND ${users.deletionPendingAt} IS NULL
+           )
+           AND EXISTS (
+             SELECT 1 FROM ${pushDevices}
+             WHERE user_id = ${identity.userID}
+               AND installation_id = ${installationID}
+               AND token_sha256 = ${tokenSHA256}
+               AND last_registered_at = ${now}
+           )`,
+    sql`
+        DELETE FROM ${pushDevices}
+         WHERE user_id = ${identity.userID} AND enabled = 0 AND id NOT IN (
+           SELECT id FROM ${pushDevices}
+           WHERE user_id = ${identity.userID}
+           ORDER BY CASE WHEN installation_id = ${installationID} THEN 0 ELSE 1 END,
+                    enabled DESC, last_registered_at DESC, updated_at DESC,
+                    created_at DESC, id DESC
+           LIMIT ${maximumRetainedPushDevicesPerUser}
+         )
+           AND EXISTS (
+             SELECT 1 FROM ${users}
+             WHERE ${users.id} = ${identity.userID}
+               AND ${users.authVersion} = ${identity.authVersion}
+               AND ${users.deletionPendingAt} IS NULL
+           )
+           AND EXISTS (
+             SELECT 1 FROM ${pushDevices}
+             WHERE user_id = ${identity.userID}
+               AND installation_id = ${installationID}
+               AND token_sha256 = ${tokenSHA256}
+               AND last_registered_at = ${now}
+           )`,
   ]);
+  if ((results[1]?.meta.changes ?? 0) !== 1) {
+    throw new AuthenticationError(
+      "invalid_token",
+      401,
+      "The ComiNavi session is no longer valid.",
+    );
+  }
   return { installationID, enabled: registration.enabled };
 }
 
@@ -121,14 +177,17 @@ export async function disablePushDevice(
   nowMilliseconds = Date.now(),
 ): Promise<void> {
   const now = Math.floor(nowMilliseconds / 1_000);
-  await database
-    .prepare(
-      `UPDATE push_devices
-       SET enabled = 0, invalidated_at = ?1, updated_at = ?1
-       WHERE user_id = ?2 AND installation_id = ?3`,
-    )
-    .bind(now, identity.userID, installationID)
-    .run();
+  await createDatabase(database).run(sql`
+       UPDATE ${pushDevices}
+       SET enabled = 0, invalidated_at = ${now}, updated_at = ${now}
+       WHERE user_id = ${identity.userID}
+         AND installation_id = ${installationID}
+         AND EXISTS (
+           SELECT 1 FROM ${users}
+           WHERE ${users.id} = ${identity.userID}
+             AND ${users.authVersion} = ${identity.authVersion}
+             AND ${users.deletionPendingAt} IS NULL
+         )`);
 }
 
 async function sha256Hex(value: string): Promise<string> {

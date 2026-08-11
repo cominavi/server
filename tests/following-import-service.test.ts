@@ -1,38 +1,30 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import {
+  parseAccountDeletion,
+  requestAccountDeletion,
+} from "../src/lib/server/account-deletion";
 import type { CominaviIdentity } from "../src/lib/server/cominavi-auth";
 import {
   FollowingImportError,
   importFollowingSnapshot,
+  processFollowingSnapshotCleanup,
   type FollowingImportBindings,
 } from "../src/lib/server/following-import";
-
-interface StoredRow {
-  subject: string;
-  twitter_username: string;
-  status: "fetching" | "ready" | "failed";
-  lease_id: string | null;
-  attempted_at: number;
-  next_allowed_at: number;
-  successful_at: number | null;
-  snapshot_key: string | null;
-  following_count: number;
-  last_error: string | null;
-}
+import { SQLiteD1Database } from "./sqlite-d1";
 
 const identity: CominaviIdentity = {
-  subject: "circlems:production:42",
-  circlemsEnvironment: "production",
-  circlemsUserID: 42,
+  subject: "0123456789abcdef0123456789abcdef",
   userID: 7,
   authVersion: 1,
 };
 
 test("six-hour lease serves same-user cache and rejects account switching", async () => {
-  const database = new FakeD1();
+  const database = setup();
   const snapshots = new FakeKV();
   const bindings: FollowingImportBindings = {
-    COMINAVI_DB: database as unknown as D1Database,
+    COMINAVI_DB: database.binding,
     COMINAVI_FOLLOWING_SNAPSHOTS: snapshots as unknown as KVNamespace,
     TWITTERAPI_IO_API_KEY: "key",
   };
@@ -80,10 +72,10 @@ test("six-hour lease serves same-user cache and rejects account switching", asyn
 });
 
 test("a failed account switch retains but never mislabels the prior snapshot", async () => {
-  const database = new FakeD1();
+  const database = setup();
   const snapshots = new FakeKV();
   const bindings: FollowingImportBindings = {
-    COMINAVI_DB: database as unknown as D1Database,
+    COMINAVI_DB: database.binding,
     COMINAVI_FOLLOWING_SNAPSHOTS: snapshots as unknown as KVNamespace,
     TWITTERAPI_IO_API_KEY: "key",
   };
@@ -108,7 +100,9 @@ test("a failed account switch retains but never mislabels the prior snapshot", a
     1_000_000,
     success,
   );
-  const priorSnapshotKey = database.row?.snapshot_key;
+  const priorSnapshotKey = database.rows(
+    "SELECT snapshot_key FROM following_imports",
+  )[0]?.snapshot_key as string;
   await assert.rejects(
     importFollowingSnapshot(
       identity,
@@ -122,7 +116,11 @@ test("a failed account switch retains but never mislabels the prior snapshot", a
       error.code === "twitter_api_error",
   );
 
-  assert.equal(database.row?.snapshot_key, priorSnapshotKey);
+  assert.equal(
+    database.rows("SELECT snapshot_key FROM following_imports")[0]
+      ?.snapshot_key,
+    priorSnapshotKey,
+  );
   assert.equal(snapshots.has(priorSnapshotKey), true);
   await assert.rejects(
     importFollowingSnapshot(
@@ -137,94 +135,200 @@ test("a failed account switch retains but never mislabels the prior snapshot", a
   );
 });
 
-class FakeD1 {
-  row: StoredRow | null = null;
+test("postpublication failure deleting the prior KV snapshot preserves the new ready cache", async () => {
+  const database = setup();
+  const snapshots = new FakeKV();
+  const bindings: FollowingImportBindings = {
+    COMINAVI_DB: database.binding,
+    COMINAVI_FOLLOWING_SNAPSHOTS: snapshots as unknown as KVNamespace,
+    TWITTERAPI_IO_API_KEY: "key",
+  };
+  let generation = 0;
+  const fetcher: typeof fetch = async () => {
+    generation += 1;
+    return Response.json({
+      status: "success",
+      followings: [{ id: `x-${generation}`, userName: `circle_${generation}` }],
+      has_next_page: false,
+    });
+  };
+  const first = await importFollowingSnapshot(
+    identity,
+    "owner",
+    bindings,
+    1_000_000,
+    fetcher,
+  );
+  const oldKey = database.rows("SELECT snapshot_key FROM following_imports")[0]
+    ?.snapshot_key as string;
+  snapshots.failNextDelete = true;
+  const second = await importFollowingSnapshot(
+    identity,
+    "owner",
+    bindings,
+    1_000_000 + 21_600_000,
+    fetcher,
+  );
+  const current = database.rows(
+    "SELECT status, snapshot_key, following_count FROM following_imports",
+  )[0]!;
+  const newKey = current.snapshot_key as string;
+  assert.equal(second.source, "twitterapi.io");
+  assert.notDeepEqual(second.followings, first.followings);
+  assert.deepEqual(current, {
+    status: "ready",
+    snapshot_key: newKey,
+    following_count: 1,
+  });
+  assert.notEqual(newKey, oldKey);
+  assert.equal(snapshots.has(newKey), true);
+  assert.equal(snapshots.has(oldKey), true);
+  assert.deepEqual(
+    database.rows("SELECT object_key FROM following_snapshot_cleanup"),
+    [{ object_key: oldKey }],
+  );
 
-  prepare(query: string): FakeStatement {
-    return new FakeStatement(this, query);
-  }
-}
+  const cached = await importFollowingSnapshot(
+    identity,
+    "owner",
+    bindings,
+    1_000_000 + 21_601_000,
+    fetcher,
+  );
+  assert.equal(cached.source, "cache");
+  assert.deepEqual(cached.followings, second.followings);
+  assert.equal(
+    await processFollowingSnapshotCleanup(
+      database.binding,
+      snapshots as unknown as KVNamespace,
+      1_000_000 + 21_602_000,
+    ),
+    1,
+  );
+  assert.equal(snapshots.has(oldKey), false);
+  assert.equal(snapshots.has(newKey), true);
+});
 
-class FakeStatement {
-  private values: unknown[] = [];
+test("deletion between KV storage and D1 publication fences the import and durably cleans the orphan", async () => {
+  const database = setup();
+  const snapshots = new FakeKV();
+  snapshots.failNextDelete = true;
+  const bindings: FollowingImportBindings = {
+    COMINAVI_DB: database.binding,
+    COMINAVI_FOLLOWING_SNAPSHOTS: snapshots as unknown as KVNamespace,
+    TWITTERAPI_IO_API_KEY: "key",
+  };
+  await assert.rejects(
+    importFollowingSnapshot(
+      identity,
+      "owner",
+      bindings,
+      1_000_000,
+      async () =>
+        Response.json({
+          status: "success",
+          followings: [{ id: "x-1", userName: "circle_a" }],
+          has_next_page: false,
+        }),
+      {
+        afterSnapshotStored: async () => {
+          await requestAccountDeletion(
+            database.binding,
+            identity,
+            parseAccountDeletion({
+              requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              confirmation: "DELETE",
+            }),
+            credentialKey(),
+            1_001_000,
+          );
+        },
+      },
+    ),
+    (error: unknown) =>
+      error instanceof FollowingImportError &&
+      error.code === "import_publication_failed",
+  );
+  assert.equal(
+    database.rows("SELECT count(*) AS count FROM users")[0]?.count,
+    0,
+  );
+  assert.equal(
+    database.rows("SELECT count(*) AS count FROM following_imports")[0]?.count,
+    0,
+  );
+  const cleanupKey = database.rows(
+    "SELECT object_key FROM following_snapshot_cleanup",
+  )[0]?.object_key as string;
+  assert.ok(cleanupKey);
+  assert.equal(snapshots.has(cleanupKey), true);
+  assert.equal(
+    await processFollowingSnapshotCleanup(
+      database.binding,
+      snapshots as unknown as KVNamespace,
+      1_601_000,
+    ),
+    1,
+  );
+  assert.equal(snapshots.has(cleanupKey), false);
+  assert.equal(
+    database.rows("SELECT count(*) AS count FROM following_snapshot_cleanup")[0]
+      ?.count,
+    0,
+  );
+});
 
-  constructor(
-    private readonly database: FakeD1,
-    private readonly query: string,
-  ) {}
-
-  bind(...values: unknown[]): this {
-    this.values = values;
-    return this;
-  }
-
-  async first<T>(): Promise<T | null> {
-    return (this.database.row ? { ...this.database.row } : null) as T | null;
-  }
-
-  async run(): Promise<{ meta: { changes: number } }> {
-    if (this.query.includes("INSERT OR IGNORE")) {
-      if (this.database.row) return { meta: { changes: 0 } };
-      this.database.row = {
-        subject: this.values[0] as string,
-        twitter_username: this.values[1] as string,
-        status: "fetching",
-        lease_id: this.values[2] as string,
-        attempted_at: this.values[3] as number,
-        next_allowed_at: this.values[4] as number,
-        successful_at: null,
-        snapshot_key: null,
-        following_count: 0,
-        last_error: null,
-      };
-      return { meta: { changes: 1 } };
-    }
-
-    const row = this.database.row;
-    if (!row) return { meta: { changes: 0 } };
-    if (this.query.includes("SET twitter_username")) {
-      const now = this.values[2] as number;
-      const subject = this.values[4] as string;
-      if (row.subject !== subject || row.next_allowed_at > now) {
-        return { meta: { changes: 0 } };
-      }
-      Object.assign(row, {
-        twitter_username: this.values[0] as string,
-        status: "fetching" as const,
-        lease_id: this.values[1] as string,
-        attempted_at: now,
-        next_allowed_at: this.values[3] as number,
-        last_error: null,
-      });
-      return { meta: { changes: 1 } };
-    }
-    if (this.query.includes("SET status = 'ready'")) {
-      if (row.subject !== this.values[3] || row.lease_id !== this.values[4]) {
-        return { meta: { changes: 0 } };
-      }
-      Object.assign(row, {
-        status: "ready" as const,
-        successful_at: this.values[0] as number,
-        snapshot_key: this.values[1] as string,
-        following_count: this.values[2] as number,
-        last_error: null,
-      });
-      return { meta: { changes: 1 } };
-    }
-    if (this.query.includes("SET status = 'failed'")) {
-      if (row.subject !== this.values[1] || row.lease_id !== this.values[2]) {
-        return { meta: { changes: 0 } };
-      }
-      row.status = "failed";
-      row.last_error = this.values[0] as string;
-      return { meta: { changes: 1 } };
-    }
-    throw new Error(`Unhandled fake D1 query: ${this.query}`);
-  }
-}
+test("cleanup leased before publication cannot delete an authoritative ready snapshot", async () => {
+  const database = setup();
+  const snapshots = new FakeKV();
+  const bindings: FollowingImportBindings = {
+    COMINAVI_DB: database.binding,
+    COMINAVI_FOLLOWING_SNAPSHOTS: snapshots as unknown as KVNamespace,
+    TWITTERAPI_IO_API_KEY: "key",
+  };
+  let cleanupCount = -1;
+  await assert.rejects(
+    importFollowingSnapshot(
+      identity,
+      "owner",
+      bindings,
+      1_000_000,
+      async () =>
+        Response.json({
+          status: "success",
+          followings: [{ id: "x-1", userName: "circle_a" }],
+          has_next_page: false,
+        }),
+      {
+        afterSnapshotStored: async () => {
+          cleanupCount = await processFollowingSnapshotCleanup(
+            database.binding,
+            snapshots as unknown as KVNamespace,
+            1_601_000,
+          );
+        },
+      },
+    ),
+    (error: unknown) =>
+      error instanceof FollowingImportError &&
+      error.code === "import_publication_failed",
+  );
+  assert.equal(cleanupCount, 1);
+  assert.deepEqual(
+    database.rows("SELECT status, snapshot_key FROM following_imports"),
+    [{ status: "failed", snapshot_key: null }],
+  );
+  assert.equal(snapshots.size, 0);
+  assert.equal(
+    database.rows("SELECT count(*) AS count FROM following_snapshot_cleanup")[0]
+      ?.count,
+    0,
+  );
+});
 
 class FakeKV {
   private readonly values = new Map<string, string>();
+  failNextDelete = false;
 
   async put(key: string, value: string): Promise<void> {
     this.values.set(key, value);
@@ -236,10 +340,47 @@ class FakeKV {
   }
 
   async delete(key: string): Promise<void> {
+    if (this.failNextDelete) {
+      this.failNextDelete = false;
+      throw new Error("simulated KV outage");
+    }
     this.values.delete(key);
   }
 
   has(key: string | null | undefined): boolean {
     return key ? this.values.has(key) : false;
   }
+
+  get size(): number {
+    return this.values.size;
+  }
+}
+
+function credentialKey(): string {
+  return Buffer.from(
+    Uint8Array.from({ length: 32 }, (_, index) => index),
+  ).toString("base64url");
+}
+
+function setup(): SQLiteD1Database {
+  const database = new SQLiteD1Database(
+    [
+      "migrations/0001_following_imports.sql",
+      "migrations/0002_realtime_service.sql",
+      "migrations/0003_accounts_shared_plans.sql",
+      "migrations/0004_sanitized_catalog.sql",
+      "migrations/0005_shared_plan_crdt_notifications.sql",
+    ]
+      .map((path) => readFileSync(path, "utf8"))
+      .join("\n"),
+  );
+  database.native
+    .prepare(
+      `INSERT INTO users (
+         id, public_id, display_name, profile_revision, auth_version,
+         created_at, updated_at, last_authenticated_at
+       ) VALUES (?1, ?2, 'Following User', 1, ?3, 1, 1, 1)`,
+    )
+    .run(identity.userID, identity.subject, identity.authVersion);
+  return database;
 }

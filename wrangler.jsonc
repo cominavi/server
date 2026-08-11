@@ -3,8 +3,32 @@
   "name": "cominavi-homepage",
   "account_id": "bee683f3b5473a422feaa41e040ac176",
   "main": "src/worker.ts",
+  "assets": {
+    "run_worker_first": [
+      "/.well-known/*",
+      "/api/*",
+      "/auth/*",
+      "/join/*",
+      "/oauth/*",
+    ],
+  },
   "compatibility_date": "2026-07-14",
   "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": false,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+      "invocation_logs": true,
+    },
+    "traces": {
+      "enabled": false,
+      "persist": true,
+      "head_sampling_rate": 1,
+    },
+  },
   "routes": [
     {
       "pattern": "cominavi.net",
@@ -17,6 +41,10 @@
     "COMINAVI_CIRCLEMS_PRODUCTION_API_ORIGIN": "https://api1.circle.ms",
     "COMINAVI_CIRCLEMS_SANDBOX_API_ORIGIN": "https://api1-sandbox.circle.ms",
     "COMINAVI_APNS_BUNDLE_IDS": "llc.mikunet.cominavi,llc.mikunet.cominavi.staging,llc.mikunet.cominavi.debug",
+    "COMINAVI_APPLE_CLIENT_IDS": "llc.mikunet.cominavi,llc.mikunet.cominavi.staging,llc.mikunet.cominavi.debug",
+    "COMINAVI_APPLE_TEAM_ID": "F25GFFJL49",
+    "COMINAVI_APP_STORE_URL": "https://apps.apple.com/jp/search?term=ComiNavi",
+    "COMINAVI_SHARED_PLAN_MUTATIONS_ENABLED": "true",
   },
   "d1_databases": [
     {
@@ -34,6 +62,37 @@
     {
       "binding": "COMINAVI_FOLLOWING_SNAPSHOTS",
       "id": "141bd302f8ac40fabc98b6a9257685ae",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "COMINAVI_AVATARS",
+      "bucket_name": "cominavi-avatars",
+    },
+    {
+      "binding": "COMINAVI_CATALOGS",
+      "bucket_name": "cominavi-catalogs-private",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "COMINAVI_PLAN_SYNC",
+        "class_name": "PlanSyncObject",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1-plan-sync",
+      "new_sqlite_classes": ["PlanSyncObject"],
+    },
+  ],
+  "ratelimits": [
+    {
+      "name": "COMINAVI_INVITE_RATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 30, "period": 60 },
     },
   ],
   "queues": {

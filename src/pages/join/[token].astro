@@ -1,0 +1,118 @@
+---
+import { env } from "cloudflare:workers";
+import Layout from "../../layouts/Layout.astro";
+import { previewInvitation } from "../../lib/server/shared-plans";
+
+export const prerender = false;
+
+Astro.response.headers.set("Cache-Control", "no-store");
+Astro.response.headers.set("Referrer-Policy", "no-referrer");
+Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+
+const token = Astro.params.token ?? "";
+let invitation: Awaited<ReturnType<typeof previewInvitation>> | null = null;
+const key = Astro.request.headers.get("CF-Connecting-IP") ?? "local";
+if ((await env.COMINAVI_INVITE_RATE_LIMITER.limit({ key })).success) {
+  try {
+    invitation = await previewInvitation(
+      env.COMINAVI_DB,
+      token,
+      env.COMINAVI_INVITE_TOKEN_SECRET,
+    );
+  } catch {
+    invitation = null;
+  }
+}
+const fallbackURL = `cominavi://join/${encodeURIComponent(token)}`;
+---
+
+<Layout title="Shared Plan に参加 | ComiNavi">
+  <main class="invite-page">
+    <a class="wordmark" href="/">COMINAVI</a>
+    <section class="invite-card" aria-labelledby="invite-title">
+      {
+        invitation ? (
+          <>
+            <p class="eyebrow">COMIKET {invitation.comiketNo}</p>
+            <h1 id="invite-title">「{invitation.planName}」に参加</h1>
+            <p>
+              このリンクから参加すると、プラン内のサークル、メモ、購入予定をメンバーと共同編集できます。
+              リンクを持つ人は、有効期限内であれば参加できます。
+            </p>
+            <div class="actions">
+              <a class="primary" href={fallbackURL}>ComiNavi で開く</a>
+              <a href={env.COMINAVI_APP_STORE_URL}>App Store で入手</a>
+            </div>
+            <p class="privacy">
+              参加前にアプリでサインインし、あなた自身の表示名とアバターを確認します。
+              このページは特定の受取人を示すものではありません。
+            </p>
+          </>
+        ) : (
+          <>
+            <p class="eyebrow">SHARED PLAN</p>
+            <h1 id="invite-title">この招待は利用できません</h1>
+            <p>リンクが無効、有効期限切れ、または取り消された可能性があります。</p>
+            <div class="actions">
+              <a class="primary" href="/">ComiNavi について見る</a>
+              <a href={env.COMINAVI_APP_STORE_URL}>App Store を開く</a>
+            </div>
+          </>
+        )
+      }
+    </section>
+  </main>
+</Layout>
+
+<style>
+  .invite-page {
+    min-height: 100vh;
+    padding: clamp(1.5rem, 5vw, 4rem);
+    background: #f6f2e9;
+    color: #171717;
+  }
+  .wordmark {
+    color: inherit;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-decoration: none;
+  }
+  .invite-card {
+    max-width: 42rem;
+    margin: clamp(4rem, 12vh, 8rem) auto 0;
+    padding: clamp(1.75rem, 5vw, 3.5rem);
+    border: 1px solid #171717;
+    border-radius: 1.5rem;
+    background: #fffdf8;
+    box-shadow: 0.75rem 0.75rem 0 #171717;
+  }
+  .eyebrow {
+    margin: 0 0 1rem;
+    color: #735a24;
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+  }
+  h1 {
+    margin: 0 0 1.25rem;
+    font-size: clamp(2rem, 7vw, 3.75rem);
+    line-height: 1.15;
+  }
+  p { line-height: 1.9; }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin: 2rem 0;
+  }
+  .actions a {
+    padding: 0.85rem 1.15rem;
+    border: 1px solid #171717;
+    border-radius: 999px;
+    color: inherit;
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .actions .primary { background: #171717; color: #fffdf8; }
+  .privacy { margin-bottom: 0; color: #5b5b5b; font-size: 0.9rem; }
+</style>

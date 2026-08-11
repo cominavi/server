@@ -94,16 +94,19 @@ test("crawler HMAC covers timestamp, idempotency key, and exact body", async () 
     .update(`${timestamp}.${idempotencyKey}.`)
     .update(body)
     .digest("hex");
-  const request = new Request("https://cominavi.net/api/v1/crawler/events", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Idempotency-Key": idempotencyKey,
-      "X-ComiNavi-Timestamp": String(timestamp),
-      "X-ComiNavi-Signature": `v1=${signature}`,
+  const request = new Request(
+    "https://cominavi.net/api/v2/internal/crawler/events",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey,
+        "X-ComiNavi-Timestamp": String(timestamp),
+        "X-ComiNavi-Signature": `v1=${signature}`,
+      },
+      body,
     },
-    body,
-  });
+  );
   const authenticated = await authenticateCrawlerRequest(
     request,
     secret,
@@ -111,11 +114,14 @@ test("crawler HMAC covers timestamp, idempotency key, and exact body", async () 
   );
   assert.equal(authenticated.idempotencyKey, idempotencyKey);
 
-  const tampered = new Request("https://cominavi.net/api/v1/crawler/events", {
-    method: "POST",
-    headers: request.headers,
-    body: `${body} `,
-  });
+  const tampered = new Request(
+    "https://cominavi.net/api/v2/internal/crawler/events",
+    {
+      method: "POST",
+      headers: request.headers,
+      body: `${body} `,
+    },
+  );
   await assert.rejects(() =>
     authenticateCrawlerRequest(tampered, secret, timestamp * 1_000),
   );

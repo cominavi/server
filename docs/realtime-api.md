@@ -8,19 +8,22 @@ events, and current state projections.
 
 ## Client authentication
 
-`POST /api/v1/auth/circlems` accepts the existing Circle.ms bearer token and
-`{"environment":"production"}` or `sandbox`. A successful request upserts the
-verified provider subject in `users` and returns a 15-minute ComiNavi JWT. Every
-authenticated endpoint verifies both the signature and the user's current
-`auth_version`. `POST /api/v1/auth/logout` increments that version and revokes
-every already-issued service token for the user.
+`POST /api/v2/auth/circlems/start` starts the backend-owned Circle.ms OAuth flow
+with a client instance ID and PKCE challenge. After the browser callback returns
+a short-lived completion code, `POST /api/v2/auth/circlems/complete` exchanges
+that code and issues the ComiNavi access and rotating refresh tokens. Circle.ms
+provider credentials stay encrypted on the backend and never travel in a
+callback URL. Every authenticated endpoint verifies both the ComiNavi token and
+the user's current `auth_version`. `POST /api/v2/auth/logout` durably advances
+that version using the exact request ID, predecessor bearer token, and refresh
+token so lost-response retries return the same receipt.
 
 No Circle.ms password, X credential, or APNs signing key is stored in D1 or sent
 to the app.
 
 ## Favorites
 
-`GET /api/v1/me/favorites/{comiket}` returns the current server revision and
+`GET /api/v2/me/favorites/{eventNumber}` returns the current server revision and
 active favorites. `PUT` replaces the user's complete snapshot:
 
 ```json
@@ -38,14 +41,14 @@ fails and retries after the next successful authentication.
 
 ## Device registration
 
-`PUT /api/v1/me/devices/{installation}` registers an APNs token, environment,
+`PUT /api/v2/me/devices/{installationID}` registers an APNs token, environment,
 and allow-listed bundle ID. `DELETE` disables it. A token is SHA-256 indexed and
 can belong to only one current service user. Logging out must disable the local
 installation before discarding the service session.
 
 ## Realtime updates
 
-`GET /api/v1/events/{comiket}/updates?after=0&limit=200` returns immutable
+`GET /api/v2/events/{eventNumber}/updates?after=0&limit=200` returns immutable
 updates in ascending cursor order. Repeat with `nextCursor`; an optional
 repeated `wcID` query narrows the stream. Each event contains the source post,
 all retained media (including shinagaki and covers), and every WCID target, so
@@ -57,7 +60,9 @@ cannot overwrite a newer booth state.
 
 ## Crawler ingress
 
-`POST /api/v1/crawler/events` is not a user endpoint. It requires:
+`POST /api/v2/internal/crawler/events` is not a user endpoint. It is described
+in the generated OpenAPI document but requires all three HMAC security headers,
+not a user bearer token:
 
 ```text
 Idempotency-Key: twitterapi:<post-id>

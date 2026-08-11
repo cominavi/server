@@ -1,4 +1,21 @@
 import type { PushQueueMessage } from "./push-queue";
+import { and, eq, inArray, isNull, lte, sql } from "drizzle-orm";
+import { createDatabase } from "../db/client";
+import { runDrizzleBatch } from "../db/batch";
+import {
+  circleUpdateEvents,
+  circleUpdateTargets,
+  circles,
+  notificationDeliveries,
+  pushDevices,
+  sharedPlanEvents,
+  sharedPlanMembers,
+  sharedPlanNotificationDeliveries,
+  sharedPlans,
+  socialPosts,
+  userFavorites,
+  users,
+} from "../db/schema";
 
 interface APNsBindings {
   COMINAVI_DB: D1Database;
@@ -24,6 +41,22 @@ interface DeliveryRow {
   subscribed: number;
 }
 
+interface SharedPlanDeliveryRow {
+  id: number;
+  attempt_count: number;
+  token: string;
+  apns_environment: "sandbox" | "production";
+  bundle_id: string;
+  event_id: string;
+  plan_id: string;
+  plan_name: string;
+  event_type: string;
+  i18n_key: string;
+  payload_version: number;
+  urgency: "routine" | "conflict";
+  collapse_key: string | null;
+}
+
 let cachedProviderToken:
   { key: string; token: string; issuedAt: number } | undefined;
 
@@ -32,7 +65,18 @@ export async function processPushQueueMessage(
   bindings: APNsBindings,
   fetcher: typeof fetch = fetch,
   nowMilliseconds = Date.now(),
+  beforeFinalAuthorityCheck?: () => void | Promise<void>,
 ): Promise<void> {
+  if (message.body?.kind === "shared-plan") {
+    await processSharedPlanPush(
+      message,
+      bindings,
+      fetcher,
+      nowMilliseconds,
+      beforeFinalAuthorityCheck,
+    );
+    return;
+  }
   const candidateDeliveryID =
     message.body && "deliveryID" in message.body
       ? message.body.deliveryID
@@ -47,15 +91,24 @@ export async function processPushQueueMessage(
   }
   const deliveryID = candidateDeliveryID;
   const now = Math.floor(nowMilliseconds / 1_000);
-  const claimed = await bindings.COMINAVI_DB.prepare(
-    `UPDATE notification_deliveries
-     SET status = 'processing', attempt_count = attempt_count + 1,
-         lease_expires_at = ?1, updated_at = ?2
-     WHERE id = ?3 AND status IN ('pending', 'retry') AND available_at <= ?2
-     RETURNING id`,
-  )
-    .bind(now + 120, now, deliveryID)
-    .first<{ id: number }>();
+  const db = createDatabase(bindings.COMINAVI_DB);
+  const claimed = await db
+    .update(notificationDeliveries)
+    .set({
+      status: "processing",
+      attemptCount: sql`${notificationDeliveries.attemptCount} + 1`,
+      leaseExpiresAt: now + 120,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(notificationDeliveries.id, deliveryID),
+        inArray(notificationDeliveries.status, ["pending", "retry"]),
+        lte(notificationDeliveries.availableAt, now),
+      ),
+    )
+    .returning({ id: notificationDeliveries.id })
+    .get();
   if (!claimed) {
     message.ack();
     return;
@@ -77,16 +130,54 @@ export async function processPushQueueMessage(
   try {
     const token = await providerToken(bindings, now);
     const request = makeAPNsRequest(delivery, token);
+    await beforeFinalAuthorityCheck?.();
+    const stillAuthorized = await db
+      .select({ authorized: notificationDeliveries.id })
+      .from(notificationDeliveries)
+      .innerJoin(
+        pushDevices,
+        eq(pushDevices.id, notificationDeliveries.deviceID),
+      )
+      .innerJoin(users, eq(users.id, notificationDeliveries.userID))
+      .where(
+        and(
+          eq(notificationDeliveries.id, deliveryID),
+          eq(notificationDeliveries.status, "processing"),
+          eq(pushDevices.enabled, 1),
+          isNull(users.deletionPendingAt),
+        ),
+      )
+      .get();
+    if (!stillAuthorized) {
+      await finishDelivery(
+        bindings.COMINAVI_DB,
+        deliveryID,
+        "suppressed",
+        now,
+        "account_disabled",
+      );
+      message.ack();
+      return;
+    }
     const response = await fetcher(request);
     const apnsID = response.headers.get("apns-id");
     if (response.ok) {
-      await bindings.COMINAVI_DB.prepare(
-        `UPDATE notification_deliveries
-         SET status = 'delivered', delivered_at = ?1, apns_id = ?2,
-             lease_expires_at = NULL, last_error = NULL, updated_at = ?1
-         WHERE id = ?3 AND status = 'processing'`,
-      )
-        .bind(now, apnsID, deliveryID)
+      await db
+        .update(notificationDeliveries)
+        .set({
+          status: "delivered",
+          deliveredAt: now,
+          apnsID,
+          leaseExpiresAt: null,
+          lastError: null,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(notificationDeliveries.id, deliveryID),
+            eq(notificationDeliveries.status, "processing"),
+          ),
+        )
         .run();
       message.ack();
       return;
@@ -99,18 +190,19 @@ export async function processPushQueueMessage(
       reason === "DeviceTokenNotForTopic" ||
       reason === "Unregistered"
     ) {
-      await bindings.COMINAVI_DB.batch([
-        bindings.COMINAVI_DB.prepare(
-          `UPDATE push_devices
-           SET enabled = 0, invalidated_at = ?1, updated_at = ?1
-           WHERE id = (SELECT device_id FROM notification_deliveries WHERE id = ?2)`,
-        ).bind(now, deliveryID),
-        bindings.COMINAVI_DB.prepare(
-          `UPDATE notification_deliveries
-           SET status = 'dead', apns_id = ?1, last_error = ?2,
-               lease_expires_at = NULL, updated_at = ?3
-           WHERE id = ?4`,
-        ).bind(apnsID, reason, now, deliveryID),
+      await runDrizzleBatch(bindings.COMINAVI_DB, [
+        sql`
+          UPDATE ${pushDevices}
+           SET enabled = 0, invalidated_at = ${now}, updated_at = ${now}
+           WHERE id = (
+             SELECT device_id FROM ${notificationDeliveries}
+             WHERE id = ${deliveryID}
+           )`,
+        sql`
+          UPDATE ${notificationDeliveries}
+          SET status = 'dead', apns_id = ${apnsID}, last_error = ${reason},
+              lease_expires_at = NULL, updated_at = ${now}
+          WHERE id = ${deliveryID}`,
       ]);
       message.ack();
       return;
@@ -133,42 +225,393 @@ export async function processPushQueueMessage(
   }
 }
 
+async function processSharedPlanPush(
+  message: Message<PushQueueMessage>,
+  bindings: APNsBindings,
+  fetcher: typeof fetch,
+  nowMilliseconds: number,
+  beforeFinalAuthorityCheck?: () => void | Promise<void>,
+): Promise<void> {
+  if (message.body?.kind !== "shared-plan") return;
+  const deliveryID = message.body.sharedPlanDeliveryID;
+  if (!Number.isSafeInteger(deliveryID) || deliveryID < 1) {
+    message.ack();
+    return;
+  }
+  const now = Math.floor(nowMilliseconds / 1_000);
+  const db = createDatabase(bindings.COMINAVI_DB);
+  const claimed = await db
+    .update(sharedPlanNotificationDeliveries)
+    .set({
+      status: "processing",
+      attemptCount: sql`${sharedPlanNotificationDeliveries.attemptCount} + 1`,
+      leaseExpiresAt: now + 120,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(sharedPlanNotificationDeliveries.id, deliveryID),
+        inArray(sharedPlanNotificationDeliveries.status, ["pending", "retry"]),
+        lte(sharedPlanNotificationDeliveries.availableAt, now),
+      ),
+    )
+    .returning({ id: sharedPlanNotificationDeliveries.id })
+    .get();
+  if (!claimed) {
+    message.ack();
+    return;
+  }
+  const delivery = await loadSharedPlanDelivery(
+    bindings.COMINAVI_DB,
+    deliveryID,
+  );
+  if (!delivery) {
+    await finishSharedPlanDelivery(
+      bindings.COMINAVI_DB,
+      deliveryID,
+      "suppressed",
+      now,
+      "plan_authority_changed",
+    );
+    message.ack();
+    return;
+  }
+  try {
+    const token = await providerToken(bindings, now);
+    const request = makeSharedPlanAPNsRequest(delivery, token);
+    await beforeFinalAuthorityCheck?.();
+    const authorized = await db
+      .select({ authorized: sharedPlanNotificationDeliveries.id })
+      .from(sharedPlanNotificationDeliveries)
+      .innerJoin(
+        sharedPlanEvents,
+        eq(sharedPlanEvents.id, sharedPlanNotificationDeliveries.eventID),
+      )
+      .innerJoin(sharedPlans, eq(sharedPlans.id, sharedPlanEvents.planID))
+      .innerJoin(
+        sharedPlanMembers,
+        and(
+          eq(sharedPlanMembers.planID, sharedPlans.id),
+          eq(sharedPlanMembers.userID, sharedPlanNotificationDeliveries.userID),
+        ),
+      )
+      .innerJoin(
+        pushDevices,
+        eq(pushDevices.id, sharedPlanNotificationDeliveries.deviceID),
+      )
+      .innerJoin(users, eq(users.id, sharedPlanNotificationDeliveries.userID))
+      .where(
+        and(
+          eq(sharedPlanNotificationDeliveries.id, deliveryID),
+          eq(sharedPlanNotificationDeliveries.status, "processing"),
+          isNull(sharedPlanMembers.revokedAt),
+          isNull(sharedPlans.archivedAt),
+          eq(
+            sharedPlanNotificationDeliveries.planNotificationEpoch,
+            sharedPlans.notificationEpoch,
+          ),
+          eq(
+            sharedPlanNotificationDeliveries.planNotificationEpoch,
+            sharedPlanEvents.planNotificationEpoch,
+          ),
+          eq(
+            sharedPlanNotificationDeliveries.membershipNotificationEpoch,
+            sharedPlanMembers.notificationEpoch,
+          ),
+          eq(pushDevices.enabled, 1),
+          isNull(users.deletionPendingAt),
+        ),
+      )
+      .get();
+    if (!authorized) {
+      await finishSharedPlanDelivery(
+        bindings.COMINAVI_DB,
+        deliveryID,
+        "suppressed",
+        now,
+        "plan_authority_changed",
+      );
+      message.ack();
+      return;
+    }
+    const response = await fetcher(request);
+    const apnsID = response.headers.get("apns-id");
+    if (response.ok) {
+      await db
+        .update(sharedPlanNotificationDeliveries)
+        .set({
+          status: "delivered",
+          deliveredAt: now,
+          apnsID,
+          leaseExpiresAt: null,
+          lastError: null,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(sharedPlanNotificationDeliveries.id, deliveryID),
+            eq(sharedPlanNotificationDeliveries.status, "processing"),
+          ),
+        )
+        .run();
+      message.ack();
+      return;
+    }
+    const reason = await apnsReason(response);
+    if (
+      response.status === 410 ||
+      reason === "BadDeviceToken" ||
+      reason === "DeviceTokenNotForTopic" ||
+      reason === "Unregistered"
+    ) {
+      await runDrizzleBatch(bindings.COMINAVI_DB, [
+        sql`
+          UPDATE ${pushDevices}
+           SET enabled = 0, invalidated_at = ${now}, updated_at = ${now}
+           WHERE id = (
+             SELECT device_id FROM ${sharedPlanNotificationDeliveries}
+             WHERE id = ${deliveryID}
+           )`,
+        sql`
+          UPDATE ${sharedPlanNotificationDeliveries}
+          SET status = 'dead', apns_id = ${apnsID}, last_error = ${reason},
+              lease_expires_at = NULL, updated_at = ${now}
+          WHERE id = ${deliveryID}`,
+      ]);
+      message.ack();
+      return;
+    }
+    if (response.status >= 500 || response.status === 429) {
+      await retrySharedPlanDelivery(
+        message,
+        bindings.COMINAVI_DB,
+        delivery,
+        reason,
+        now,
+      );
+      return;
+    }
+    await finishSharedPlanDelivery(
+      bindings.COMINAVI_DB,
+      deliveryID,
+      "dead",
+      now,
+      reason,
+    );
+    message.ack();
+  } catch (error) {
+    await retrySharedPlanDelivery(
+      message,
+      bindings.COMINAVI_DB,
+      delivery,
+      error instanceof Error ? error.message : "push_transport_error",
+      now,
+    );
+  }
+}
+
+async function loadSharedPlanDelivery(
+  database: D1Database,
+  deliveryID: number,
+): Promise<SharedPlanDeliveryRow | null> {
+  const row = await createDatabase(database)
+    .select({
+      id: sql<number>`${sharedPlanNotificationDeliveries.id}`.as("delivery_id"),
+      attemptCount: sharedPlanNotificationDeliveries.attemptCount,
+      token: pushDevices.token,
+      apnsEnvironment: pushDevices.apnsEnvironment,
+      bundleID: pushDevices.bundleID,
+      eventID: sql<string>`${sharedPlanEvents.id}`.as("event_id"),
+      planID: sharedPlanEvents.planID,
+      planName: sharedPlans.name,
+      eventType: sharedPlanEvents.eventType,
+      i18nKey: sharedPlanEvents.i18nKey,
+      payloadVersion: sharedPlanEvents.payloadVersion,
+      urgency: sharedPlanNotificationDeliveries.urgency,
+      collapseKey: sharedPlanNotificationDeliveries.collapseKey,
+    })
+    .from(sharedPlanNotificationDeliveries)
+    .innerJoin(
+      sharedPlanEvents,
+      eq(sharedPlanEvents.id, sharedPlanNotificationDeliveries.eventID),
+    )
+    .innerJoin(sharedPlans, eq(sharedPlans.id, sharedPlanEvents.planID))
+    .innerJoin(
+      sharedPlanMembers,
+      and(
+        eq(sharedPlanMembers.planID, sharedPlans.id),
+        eq(sharedPlanMembers.userID, sharedPlanNotificationDeliveries.userID),
+      ),
+    )
+    .innerJoin(
+      pushDevices,
+      eq(pushDevices.id, sharedPlanNotificationDeliveries.deviceID),
+    )
+    .innerJoin(users, eq(users.id, sharedPlanNotificationDeliveries.userID))
+    .where(
+      and(
+        eq(sharedPlanNotificationDeliveries.id, deliveryID),
+        eq(sharedPlanNotificationDeliveries.status, "processing"),
+        isNull(sharedPlanMembers.revokedAt),
+        isNull(sharedPlans.archivedAt),
+        eq(
+          sharedPlanNotificationDeliveries.planNotificationEpoch,
+          sharedPlans.notificationEpoch,
+        ),
+        eq(
+          sharedPlanNotificationDeliveries.planNotificationEpoch,
+          sharedPlanEvents.planNotificationEpoch,
+        ),
+        eq(
+          sharedPlanNotificationDeliveries.membershipNotificationEpoch,
+          sharedPlanMembers.notificationEpoch,
+        ),
+        eq(pushDevices.enabled, 1),
+        isNull(users.deletionPendingAt),
+      ),
+    )
+    .get();
+  return row
+    ? {
+        id: row.id,
+        attempt_count: row.attemptCount,
+        token: row.token,
+        apns_environment: row.apnsEnvironment,
+        bundle_id: row.bundleID,
+        event_id: row.eventID,
+        plan_id: row.planID,
+        plan_name: row.planName,
+        event_type: row.eventType,
+        i18n_key: row.i18nKey,
+        payload_version: row.payloadVersion,
+        urgency: row.urgency,
+        collapse_key: row.collapseKey,
+      }
+    : null;
+}
+
+function makeSharedPlanAPNsRequest(
+  delivery: SharedPlanDeliveryRow,
+  providerJWT: string,
+): Request {
+  const host =
+    delivery.apns_environment === "production"
+      ? "https://api.push.apple.com"
+      : "https://api.sandbox.push.apple.com";
+  const headers: Record<string, string> = {
+    Authorization: `bearer ${providerJWT}`,
+    "Content-Type": "application/json",
+    "apns-topic": delivery.bundle_id,
+    "apns-push-type": "alert",
+    "apns-priority": "10",
+    "apns-expiration": String(Math.floor(Date.now() / 1_000) + 21_600),
+  };
+  if (delivery.collapse_key)
+    headers["apns-collapse-id"] = delivery.collapse_key;
+  return new Request(`${host}/3/device/${delivery.token}`, {
+    method: "POST",
+    signal: AbortSignal.timeout(15_000),
+    headers,
+    body: JSON.stringify({
+      aps: {
+        alert: {
+          "loc-key": delivery.i18n_key,
+          "loc-args": [delivery.plan_name],
+        },
+        sound: "default",
+        "thread-id": `shared-plan-${delivery.plan_id}`,
+        "interruption-level":
+          delivery.urgency === "conflict" ? "time-sensitive" : "active",
+      },
+      cominavi: {
+        version: 1,
+        kind: "sharedPlanEvent",
+        eventID: delivery.event_id,
+        planID: delivery.plan_id,
+        eventType: delivery.event_type,
+        payloadVersion: delivery.payload_version,
+      },
+    }),
+  });
+}
+
 async function loadDelivery(
   database: D1Database,
   deliveryID: number,
 ): Promise<DeliveryRow | null> {
-  return database
-    .prepare(
-      `SELECT delivery.id, delivery.attempt_count, device.token,
-              device.apns_environment, device.bundle_id, event.state_kind,
-              event.state_value, event.update_kind, target.comiket_no,
-              target.wc_id,
-              COALESCE(circle.circle_name, '') AS circle_name,
-              post.author_handle, post.text,
-              CASE WHEN EXISTS (
-                SELECT 1
-                FROM circle_update_targets AS subscribed_target
-                JOIN user_favorites AS favorite
-                  ON favorite.comiket_no = subscribed_target.comiket_no
-                 AND favorite.wc_id = subscribed_target.wc_id
-                 AND favorite.user_id = delivery.user_id
-                 AND favorite.active = 1
-                 AND favorite.notifications_enabled = 1
-                WHERE subscribed_target.update_event_id = event.id
-              ) THEN 1 ELSE 0 END AS subscribed
-       FROM notification_deliveries AS delivery
-       JOIN push_devices AS device ON device.id = delivery.device_id
-       JOIN circle_update_events AS event ON event.id = delivery.update_event_id
-       JOIN social_posts AS post ON post.post_id = event.post_id
-       JOIN circle_update_targets AS target ON target.update_event_id = event.id
-       JOIN circles AS circle
-         ON circle.comiket_no = target.comiket_no AND circle.wc_id = target.wc_id
-       WHERE delivery.id = ?1
-       ORDER BY target.wc_id
-       LIMIT 1`,
+  const subscribed = sql<number>`CASE WHEN EXISTS (
+    SELECT 1 FROM ${circleUpdateTargets} AS subscribed_target
+    JOIN ${userFavorites} AS favorite
+      ON favorite.comiket_no = subscribed_target.comiket_no
+     AND favorite.wc_id = subscribed_target.wc_id
+     AND favorite.user_id = ${notificationDeliveries.userID}
+     AND favorite.active = 1 AND favorite.notifications_enabled = 1
+    WHERE subscribed_target.update_event_id = ${circleUpdateEvents.id}
+  ) THEN 1 ELSE 0 END`;
+  const row = await createDatabase(database)
+    .select({
+      id: notificationDeliveries.id,
+      attemptCount: notificationDeliveries.attemptCount,
+      token: pushDevices.token,
+      apnsEnvironment: pushDevices.apnsEnvironment,
+      bundleID: pushDevices.bundleID,
+      stateKind: circleUpdateEvents.stateKind,
+      stateValue: circleUpdateEvents.stateValue,
+      updateKind: circleUpdateEvents.updateKind,
+      comiketNo: circleUpdateTargets.comiketNo,
+      wcID: circleUpdateTargets.wcID,
+      circleName: sql<string>`coalesce(${circles.circleName}, '')`,
+      authorHandle: socialPosts.authorHandle,
+      text: socialPosts.text,
+      subscribed,
+    })
+    .from(notificationDeliveries)
+    .innerJoin(pushDevices, eq(pushDevices.id, notificationDeliveries.deviceID))
+    .innerJoin(users, eq(users.id, notificationDeliveries.userID))
+    .innerJoin(
+      circleUpdateEvents,
+      eq(circleUpdateEvents.id, notificationDeliveries.updateEventID),
     )
-    .bind(deliveryID)
-    .first<DeliveryRow>();
+    .innerJoin(socialPosts, eq(socialPosts.postID, circleUpdateEvents.postID))
+    .innerJoin(
+      circleUpdateTargets,
+      eq(circleUpdateTargets.updateEventID, circleUpdateEvents.id),
+    )
+    .innerJoin(
+      circles,
+      and(
+        eq(circles.comiketNo, circleUpdateTargets.comiketNo),
+        eq(circles.wcID, circleUpdateTargets.wcID),
+      ),
+    )
+    .where(
+      and(
+        eq(notificationDeliveries.id, deliveryID),
+        eq(pushDevices.enabled, 1),
+        isNull(users.deletionPendingAt),
+      ),
+    )
+    .orderBy(circleUpdateTargets.wcID)
+    .limit(1)
+    .get();
+  return row
+    ? {
+        id: row.id,
+        attempt_count: row.attemptCount,
+        token: row.token,
+        apns_environment: row.apnsEnvironment,
+        bundle_id: row.bundleID,
+        state_kind: row.stateKind,
+        state_value: row.stateValue,
+        update_kind: row.updateKind,
+        comiket_no: row.comiketNo,
+        wc_id: row.wcID,
+        circle_name: row.circleName,
+        author_handle: row.authorHandle,
+        text: row.text,
+        subscribed: row.subscribed,
+      }
+    : null;
 }
 
 function makeAPNsRequest(delivery: DeliveryRow, providerJWT: string): Request {
@@ -324,14 +767,16 @@ async function retryDelivery(
     return;
   }
   const delay = Math.min(3_600, 15 * 2 ** Math.min(delivery.attempt_count, 8));
-  await database
-    .prepare(
-      `UPDATE notification_deliveries
-       SET status = 'retry', available_at = ?1, lease_expires_at = NULL,
-           last_error = ?2, updated_at = ?3
-       WHERE id = ?4`,
-    )
-    .bind(now + delay, reason.slice(0, 1_000), now, delivery.id)
+  await createDatabase(database)
+    .update(notificationDeliveries)
+    .set({
+      status: "retry",
+      availableAt: now + delay,
+      leaseExpiresAt: null,
+      lastError: reason.slice(0, 1_000),
+      updatedAt: now,
+    })
+    .where(eq(notificationDeliveries.id, delivery.id))
     .run();
   message.retry({ delaySeconds: delay });
 }
@@ -343,12 +788,60 @@ async function finishDelivery(
   now: number,
   reason: string,
 ): Promise<void> {
-  await database
-    .prepare(
-      `UPDATE notification_deliveries
-       SET status = ?1, last_error = ?2, lease_expires_at = NULL, updated_at = ?3
-       WHERE id = ?4`,
-    )
-    .bind(status, reason.slice(0, 1_000), now, deliveryID)
+  await createDatabase(database)
+    .update(notificationDeliveries)
+    .set({
+      status,
+      lastError: reason.slice(0, 1_000),
+      leaseExpiresAt: null,
+      updatedAt: now,
+    })
+    .where(eq(notificationDeliveries.id, deliveryID))
+    .run();
+}
+
+async function retrySharedPlanDelivery(
+  message: Message<PushQueueMessage>,
+  database: D1Database,
+  delivery: SharedPlanDeliveryRow,
+  reason: string,
+  now: number,
+): Promise<void> {
+  if (delivery.attempt_count >= 8) {
+    await finishSharedPlanDelivery(database, delivery.id, "dead", now, reason);
+    message.ack();
+    return;
+  }
+  const delay = Math.min(3_600, 15 * 2 ** Math.min(delivery.attempt_count, 8));
+  await createDatabase(database)
+    .update(sharedPlanNotificationDeliveries)
+    .set({
+      status: "retry",
+      availableAt: now + delay,
+      leaseExpiresAt: null,
+      lastError: reason.slice(0, 1_000),
+      updatedAt: now,
+    })
+    .where(eq(sharedPlanNotificationDeliveries.id, delivery.id))
+    .run();
+  message.retry({ delaySeconds: delay });
+}
+
+async function finishSharedPlanDelivery(
+  database: D1Database,
+  deliveryID: number,
+  status: "dead" | "suppressed",
+  now: number,
+  reason: string,
+): Promise<void> {
+  await createDatabase(database)
+    .update(sharedPlanNotificationDeliveries)
+    .set({
+      status,
+      lastError: reason.slice(0, 1_000),
+      leaseExpiresAt: null,
+      updatedAt: now,
+    })
+    .where(eq(sharedPlanNotificationDeliveries.id, deliveryID))
     .run();
 }

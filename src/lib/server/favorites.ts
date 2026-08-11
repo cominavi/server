@@ -1,4 +1,18 @@
+import { and, eq, sql } from "drizzle-orm";
+
+import { runDrizzleBatch } from "../db/batch";
+import { createDatabase } from "../db/client";
+import {
+  catalogStableCircles,
+  favoriteMutationAtomicAssertions,
+  favoriteMutationReceipts,
+  favoriteSets,
+  userFavorites,
+  users,
+} from "../db/schema";
 import type { CominaviIdentity } from "./cominavi-auth";
+import { sha256Hex } from "./auth-sessions";
+import { parseCanonicalRequestID } from "./request-id";
 import { ServiceError } from "./service-error";
 
 export interface FavoriteInput {
@@ -13,15 +27,11 @@ export interface FavoriteSnapshot {
   favorites: FavoriteInput[];
 }
 
-interface FavoriteSetRow {
-  revision: number;
-  last_mutation_id: string | null;
-}
-
-interface FavoriteRow {
-  wc_id: number;
-  color: number;
-  notifications_enabled: number;
+interface FavoriteSnapshotRow {
+  revision: number | null;
+  wc_id: number | null;
+  color: number | null;
+  notifications_enabled: number | null;
 }
 
 const maximumFavorites = 30_000;
@@ -50,8 +60,6 @@ export function parseFavoriteSnapshotBody(value: unknown): {
   if (
     !Number.isSafeInteger(baseRevision) ||
     Number(baseRevision) < 0 ||
-    typeof mutationID !== "string" ||
-    !/^[0-9a-fA-F-]{16,64}$/.test(mutationID) ||
     !Array.isArray(rawFavorites) ||
     rawFavorites.length > maximumFavorites
   ) {
@@ -79,7 +87,7 @@ export function parseFavoriteSnapshotBody(value: unknown): {
   }
   return {
     baseRevision: Number(baseRevision),
-    mutationID,
+    mutationID: parseCanonicalRequestID(mutationID),
     favorites: Array.from(byWCID.values()).sort(
       (left, right) => left.wcID - right.wcID,
     ),
@@ -91,33 +99,37 @@ export async function loadFavoriteSnapshot(
   identity: CominaviIdentity,
   eventNumber: number,
 ): Promise<FavoriteSnapshot> {
-  const [set, rows] = await Promise.all([
-    database
-      .prepare(
-        `SELECT revision, last_mutation_id
-         FROM favorite_sets
-         WHERE user_id = ?1 AND comiket_no = ?2`,
-      )
-      .bind(identity.userID, eventNumber)
-      .first<FavoriteSetRow>(),
-    database
-      .prepare(
-        `SELECT wc_id, color, notifications_enabled
-         FROM user_favorites
-         WHERE user_id = ?1 AND comiket_no = ?2 AND active = 1
-         ORDER BY wc_id`,
-      )
-      .bind(identity.userID, eventNumber)
-      .all<FavoriteRow>(),
-  ]);
+  // Revision and rows come from one SQLite read snapshot. Rows from an older
+  // replacement are excluded even if a concurrent writer advances the set.
+  const rows = await createDatabase(database).all<FavoriteSnapshotRow>(sql`
+    SELECT favorite_set.revision, favorite.wc_id, favorite.color,
+           favorite.notifications_enabled
+    FROM (SELECT 1) AS singleton
+    LEFT JOIN ${favoriteSets} AS favorite_set
+      ON favorite_set.user_id = ${identity.userID}
+     AND favorite_set.comiket_no = ${eventNumber}
+    LEFT JOIN ${userFavorites} AS favorite
+      ON favorite.user_id = ${identity.userID}
+     AND favorite.comiket_no = ${eventNumber}
+     AND favorite.active = 1
+     AND favorite.snapshot_revision = favorite_set.revision
+    ORDER BY favorite.wc_id
+  `);
+  const revision = rows[0]?.revision ?? 0;
   return {
     eventNumber,
-    revision: set?.revision ?? 0,
-    favorites: rows.results.map((row) => ({
-      wcID: row.wc_id,
-      color: row.color,
-      notificationsEnabled: row.notifications_enabled === 1,
-    })),
+    revision,
+    favorites: rows.flatMap((row) =>
+      row.wc_id === null
+        ? []
+        : [
+            {
+              wcID: row.wc_id,
+              color: row.color!,
+              notificationsEnabled: row.notifications_enabled === 1,
+            },
+          ],
+    ),
   };
 }
 
@@ -130,131 +142,170 @@ export async function replaceFavoriteSnapshot(
 ): Promise<FavoriteSnapshot> {
   const now = Math.floor(nowMilliseconds / 1_000);
   const favoritesJSON = JSON.stringify(input.favorites);
-  const unknown = await database
-    .prepare(
-      `SELECT CAST(json_extract(requested.value, '$.wcID') AS INTEGER) AS wc_id
-       FROM json_each(?1) AS requested
-       LEFT JOIN circles AS circle
-         ON circle.comiket_no = ?2
-        AND circle.wc_id = CAST(json_extract(requested.value, '$.wcID') AS INTEGER)
-       WHERE circle.wc_id IS NULL
-       LIMIT 20`,
+  const payloadHash = await sha256Hex(
+    JSON.stringify({
+      v: 1,
+      eventNumber,
+      baseRevision: input.baseRevision,
+      favorites: input.favorites,
+    }),
+  );
+  const db = createDatabase(database);
+  const prior = await db
+    .select({ payloadHash: favoriteMutationReceipts.payloadHash })
+    .from(favoriteMutationReceipts)
+    .where(
+      and(
+        eq(favoriteMutationReceipts.userID, identity.userID),
+        eq(favoriteMutationReceipts.comiketNo, eventNumber),
+        eq(favoriteMutationReceipts.mutationID, input.mutationID),
+      ),
     )
-    .bind(favoritesJSON, eventNumber)
-    .all<{ wc_id: number }>();
-  if (unknown.results.length > 0) {
+    .get();
+  if (prior) {
+    if (prior.payloadHash !== payloadHash) throw idempotencyConflict();
+    return loadFavoriteSnapshot(database, identity, eventNumber);
+  }
+  const unknown = await db.all<{ wc_id: number }>(sql`
+    SELECT CAST(json_extract(requested.value, '$.wcID') AS INTEGER) AS wc_id
+    FROM json_each(${favoritesJSON}) AS requested
+    LEFT JOIN ${catalogStableCircles} AS circle
+      ON circle.comiket_no = ${eventNumber}
+     AND circle.wc_id = CAST(json_extract(requested.value, '$.wcID') AS INTEGER)
+    WHERE circle.wc_id IS NULL
+    LIMIT 20
+  `);
+  if (unknown.length > 0) {
     throw new ServiceError(
       "unknown_circle",
       422,
       "One or more favorites are not in the current service catalog.",
-      { wcIDs: unknown.results.map((row) => row.wc_id) },
+      { wcIDs: unknown.map((row) => row.wc_id) },
     );
   }
 
-  await database
-    .prepare(
-      `INSERT OR IGNORE INTO favorite_sets
-         (user_id, comiket_no, revision, last_mutation_id, updated_at)
-       VALUES (?1, ?2, 0, NULL, ?3)`,
+  const existing = await db
+    .select({
+      revision: favoriteSets.revision,
+      last_mutation_id: favoriteSets.lastMutationID,
+      last_mutation_payload_hash: favoriteSets.lastMutationPayloadHash,
+    })
+    .from(favoriteSets)
+    .where(
+      and(
+        eq(favoriteSets.userID, identity.userID),
+        eq(favoriteSets.comiketNo, eventNumber),
+      ),
     )
-    .bind(identity.userID, eventNumber, now)
-    .run();
-
-  const existing = await database
-    .prepare(
-      `SELECT revision, last_mutation_id
-       FROM favorite_sets
-       WHERE user_id = ?1 AND comiket_no = ?2`,
-    )
-    .bind(identity.userID, eventNumber)
-    .first<FavoriteSetRow>();
-  if (existing?.last_mutation_id === input.mutationID) {
+    .get();
+  if (
+    existing?.last_mutation_id === input.mutationID &&
+    existing.last_mutation_payload_hash === payloadHash
+  ) {
     return loadFavoriteSnapshot(database, identity, eventNumber);
   }
-  if (!existing || existing.revision !== input.baseRevision) {
+  if ((existing?.revision ?? 0) !== input.baseRevision) {
     throw revisionConflict(existing?.revision ?? 0);
   }
 
   const nextRevision = input.baseRevision + 1;
-  const results = await database.batch([
-    database
-      .prepare(
-        `UPDATE favorite_sets
-         SET revision = ?1, last_mutation_id = ?2, updated_at = ?3
-         WHERE user_id = ?4 AND comiket_no = ?5 AND revision = ?6`,
+  const results = await runDrizzleBatch(database, [
+    sql`INSERT INTO ${favoriteSets} (
+      user_id, comiket_no, revision, last_mutation_id,
+      last_mutation_payload_hash, updated_at
+    )
+    SELECT ${identity.userID}, ${eventNumber}, ${nextRevision},
+      ${input.mutationID}, ${payloadHash}, ${now}
+    FROM ${users}
+    WHERE ${users.id} = ${identity.userID}
+      AND ${users.authVersion} = ${identity.authVersion}
+      AND ${users.deletionPendingAt} IS NULL
+    ON CONFLICT(user_id, comiket_no) DO UPDATE SET
+      revision = excluded.revision,
+      last_mutation_id = excluded.last_mutation_id,
+      last_mutation_payload_hash = excluded.last_mutation_payload_hash,
+      updated_at = excluded.updated_at
+    WHERE ${favoriteSets.revision} = ${input.baseRevision}`,
+    sql`INSERT INTO ${userFavorites} (
+      user_id, comiket_no, wc_id, color, notifications_enabled,
+      active, snapshot_revision, created_at, updated_at
+    )
+    SELECT ${identity.userID}, ${eventNumber},
+      CAST(json_extract(item.value, '$.wcID') AS INTEGER),
+      CAST(json_extract(item.value, '$.color') AS INTEGER),
+      CASE json_extract(item.value, '$.notificationsEnabled')
+        WHEN 1 THEN 1 ELSE 0 END,
+      1, ${nextRevision}, ${now}, ${now}
+    FROM json_each(${favoritesJSON}) AS item
+    WHERE EXISTS (
+      SELECT 1 FROM ${favoriteSets}
+      WHERE ${favoriteSets.userID} = ${identity.userID}
+        AND ${favoriteSets.comiketNo} = ${eventNumber}
+        AND ${favoriteSets.revision} = ${nextRevision}
+        AND ${favoriteSets.lastMutationID} = ${input.mutationID}
+        AND ${favoriteSets.lastMutationPayloadHash} = ${payloadHash}
+    )
+    ON CONFLICT(user_id, comiket_no, wc_id) DO UPDATE SET
+      color = excluded.color,
+      notifications_enabled = excluded.notifications_enabled,
+      active = 1,
+      snapshot_revision = excluded.snapshot_revision,
+      updated_at = excluded.updated_at`,
+    sql`UPDATE ${userFavorites}
+    SET active = 0, snapshot_revision = ${nextRevision}, updated_at = ${now}
+    WHERE ${userFavorites.userID} = ${identity.userID}
+      AND ${userFavorites.comiketNo} = ${eventNumber}
+      AND ${userFavorites.active} = 1
+      AND EXISTS (
+        SELECT 1 FROM ${favoriteSets}
+        WHERE ${favoriteSets.userID} = ${identity.userID}
+          AND ${favoriteSets.comiketNo} = ${eventNumber}
+          AND ${favoriteSets.revision} = ${nextRevision}
+          AND ${favoriteSets.lastMutationID} = ${input.mutationID}
+          AND ${favoriteSets.lastMutationPayloadHash} = ${payloadHash}
       )
-      .bind(
-        nextRevision,
-        input.mutationID,
-        now,
-        identity.userID,
-        eventNumber,
-        input.baseRevision,
-      ),
-    database
-      .prepare(
-        `INSERT INTO user_favorites (
-           user_id, comiket_no, wc_id, color, notifications_enabled,
-           active, snapshot_revision, created_at, updated_at
-         )
-         SELECT ?1, ?2,
-                CAST(json_extract(item.value, '$.wcID') AS INTEGER),
-                CAST(json_extract(item.value, '$.color') AS INTEGER),
-                CASE json_extract(item.value, '$.notificationsEnabled')
-                  WHEN 1 THEN 1 ELSE 0 END,
-                1, ?3, ?4, ?4
-         FROM json_each(?5) AS item
-         WHERE EXISTS (
-           SELECT 1 FROM favorite_sets
-           WHERE user_id = ?1 AND comiket_no = ?2
-             AND revision = ?3 AND last_mutation_id = ?6
-         )
-         ON CONFLICT(user_id, comiket_no, wc_id) DO UPDATE SET
-           color = excluded.color,
-           notifications_enabled = excluded.notifications_enabled,
-           active = 1,
-           snapshot_revision = excluded.snapshot_revision,
-           updated_at = excluded.updated_at`,
-      )
-      .bind(
-        identity.userID,
-        eventNumber,
-        nextRevision,
-        now,
-        favoritesJSON,
-        input.mutationID,
-      ),
-    database
-      .prepare(
-        `UPDATE user_favorites
-         SET active = 0, snapshot_revision = ?1, updated_at = ?2
-         WHERE user_id = ?3 AND comiket_no = ?4 AND active = 1
-           AND EXISTS (
-             SELECT 1 FROM favorite_sets
-             WHERE user_id = ?3 AND comiket_no = ?4
-               AND revision = ?1 AND last_mutation_id = ?5
-           )
-           AND NOT EXISTS (
-             SELECT 1 FROM json_each(?6) AS item
-             WHERE CAST(json_extract(item.value, '$.wcID') AS INTEGER)
-                   = user_favorites.wc_id
-           )`,
-      )
-      .bind(
-        nextRevision,
-        now,
-        identity.userID,
-        eventNumber,
-        input.mutationID,
-        favoritesJSON,
-      ),
+      AND NOT EXISTS (
+        SELECT 1 FROM json_each(${favoritesJSON}) AS item
+        WHERE CAST(json_extract(item.value, '$.wcID') AS INTEGER)
+          = ${userFavorites.wcID}
+      )`,
+    sql`INSERT INTO ${favoriteMutationReceipts} (
+      user_id, comiket_no, mutation_id, payload_hash,
+      result_revision, created_at
+    )
+    SELECT ${identity.userID}, ${eventNumber}, ${input.mutationID},
+      ${payloadHash}, ${favoriteSets.revision}, ${now}
+    FROM ${favoriteSets}
+    WHERE ${favoriteSets.userID} = ${identity.userID}
+      AND ${favoriteSets.comiketNo} = ${eventNumber}
+      AND ${favoriteSets.revision} = ${nextRevision}
+      AND ${favoriteSets.lastMutationID} = ${input.mutationID}
+      AND ${favoriteSets.lastMutationPayloadHash} = ${payloadHash}`,
+    sql`INSERT INTO ${favoriteMutationAtomicAssertions} (
+      user_id, comiket_no, mutation_id, committed, created_at
+    ) VALUES (
+      ${identity.userID}, ${eventNumber}, ${input.mutationID},
+      CASE WHEN EXISTS (
+        SELECT 1 FROM ${favoriteMutationReceipts}
+        WHERE ${favoriteMutationReceipts.userID} = ${identity.userID}
+          AND ${favoriteMutationReceipts.comiketNo} = ${eventNumber}
+          AND ${favoriteMutationReceipts.mutationID} = ${input.mutationID}
+          AND ${favoriteMutationReceipts.payloadHash} = ${payloadHash}
+          AND ${favoriteMutationReceipts.resultRevision} = ${nextRevision}
+      ) THEN 1 ELSE 0 END,
+      ${now}
+    )`,
   ]);
-
-  if ((results[0]?.meta.changes ?? 0) !== 1) {
-    const current = await loadFavoriteSnapshot(database, identity, eventNumber);
-    throw revisionConflict(current.revision);
-  }
+  void results;
   return loadFavoriteSnapshot(database, identity, eventNumber);
+}
+
+function idempotencyConflict(): ServiceError {
+  return new ServiceError(
+    "idempotency_conflict",
+    409,
+    "This mutationID was already used with a different favorites payload.",
+  );
 }
 
 function revisionConflict(currentRevision: number): ServiceError {

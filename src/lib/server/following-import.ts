@@ -1,5 +1,23 @@
 import type { CominaviIdentity } from "./cominavi-auth";
 import {
+  and,
+  asc,
+  eq,
+  exists,
+  isNull,
+  lte,
+  notExists,
+  or,
+  sql,
+} from "drizzle-orm";
+import { createDatabase } from "../db/client";
+import { runDrizzleBatch } from "../db/batch";
+import {
+  followingImports,
+  followingSnapshotCleanup,
+  users,
+} from "../db/schema";
+import {
   fetchTwitterFollowings,
   normalizeTwitterUserName,
   TwitterFollowingError,
@@ -36,6 +54,10 @@ export interface FollowingImportResponse extends FollowingSnapshot {
   source: "twitterapi.io" | "cache";
 }
 
+export interface FollowingImportHooks {
+  afterSnapshotStored?: () => Promise<void>;
+}
+
 export class FollowingImportError extends Error {
   constructor(
     readonly code: string,
@@ -55,6 +77,7 @@ export async function importFollowingSnapshot(
   bindings: FollowingImportBindings,
   nowMilliseconds = Date.now(),
   fetcher: typeof fetch = fetch,
+  hooks: FollowingImportHooks = {},
 ): Promise<FollowingImportResponse> {
   const userName = normalizeTwitterUserName(requestedUserName);
   if (!userName) {
@@ -66,7 +89,7 @@ export async function importFollowingSnapshot(
   }
 
   const now = Math.floor(nowMilliseconds / 1_000);
-  const existing = await loadRow(bindings.COMINAVI_DB, identity.subject);
+  const existing = await loadRow(bindings.COMINAVI_DB, identity);
   if (existing && existing.next_allowed_at > now) {
     if (existing.twitter_username !== userName) {
       throw cooldownError(existing.next_allowed_at);
@@ -76,6 +99,7 @@ export async function importFollowingSnapshot(
       existing.snapshot_key,
     );
     if (snapshotMatchesUserName(cached, userName)) {
+      await assertImportAuthority(bindings.COMINAVI_DB, identity);
       return { ...cached, source: "cache" };
     }
     throw new FollowingImportError(
@@ -92,20 +116,21 @@ export async function importFollowingSnapshot(
   const nextAllowedAt = now + followingImportIntervalSeconds;
   const acquired = await acquireLease(
     bindings.COMINAVI_DB,
-    identity.subject,
+    identity,
     userName,
     leaseID,
     now,
     nextAllowedAt,
   );
   if (!acquired) {
-    const current = await loadRow(bindings.COMINAVI_DB, identity.subject);
+    const current = await loadRow(bindings.COMINAVI_DB, identity);
     if (current?.twitter_username === userName) {
       const cached = await loadSnapshot(
         bindings.COMINAVI_FOLLOWING_SNAPSHOTS,
         current.snapshot_key,
       );
       if (snapshotMatchesUserName(cached, userName)) {
+        await assertImportAuthority(bindings.COMINAVI_DB, identity);
         return { ...cached, source: "cache" };
       }
     }
@@ -119,6 +144,8 @@ export async function importFollowingSnapshot(
     );
   }
 
+  let snapshotKey: string | null = null;
+  let publishedSnapshot = false;
   try {
     const followings = await fetchTwitterFollowings(
       userName,
@@ -131,45 +158,123 @@ export async function importFollowingSnapshot(
       nextAllowedAt: new Date(nextAllowedAt * 1_000).toISOString(),
       followings,
     };
-    const snapshotKey = `following-import/${encodeURIComponent(identity.subject)}/${leaseID}`;
+    snapshotKey = `following-import/${encodeURIComponent(identity.subject)}/${leaseID}`;
+    const db = createDatabase(bindings.COMINAVI_DB);
+    const cleanupQueued = await db.run(sql`
+      INSERT INTO ${followingSnapshotCleanup} (
+         object_key, state, attempt_count, lease_id, lease_expires_at,
+         available_at, last_error, created_at, updated_at
+       )
+       SELECT ${snapshotKey}, 'queued', 0, NULL, NULL, ${now} + 600,
+              NULL, ${now}, ${now}
+       FROM ${users}
+       WHERE ${users.id} = ${identity.userID}
+         AND ${users.publicID} = ${identity.subject}
+         AND ${users.authVersion} = ${identity.authVersion}
+         AND deletion_pending_at IS NULL
+       ON CONFLICT(object_key) DO NOTHING`);
+    if ((cleanupQueued.meta.changes ?? 0) !== 1) throw unavailableImport();
     await bindings.COMINAVI_FOLLOWING_SNAPSHOTS.put(
       snapshotKey,
       JSON.stringify(snapshot),
     );
+    await hooks.afterSnapshotStored?.();
 
-    const published = await bindings.COMINAVI_DB.prepare(
-      `UPDATE following_imports
-       SET status = 'ready', successful_at = ?1, snapshot_key = ?2,
-           following_count = ?3, last_error = NULL
-       WHERE subject = ?4 AND lease_id = ?5`,
-    )
-      .bind(now, snapshotKey, followings.length, identity.subject, leaseID)
-      .run();
-    if ((published.meta.changes ?? 0) !== 1) {
+    const published = await runDrizzleBatch(bindings.COMINAVI_DB, [
+      sql`
+        UPDATE ${followingImports}
+         SET status = 'ready', successful_at = ${now},
+             snapshot_key = ${snapshotKey}, following_count = ${followings.length},
+             last_error = NULL
+         WHERE subject = ${identity.subject} AND lease_id = ${leaseID}
+           AND EXISTS (
+             SELECT 1 FROM ${users}
+             WHERE ${users.id} = ${identity.userID}
+               AND ${users.publicID} = ${identity.subject}
+               AND ${users.authVersion} = ${identity.authVersion}
+               AND ${users.deletionPendingAt} IS NULL
+           )
+           AND EXISTS (
+             SELECT 1 FROM ${followingSnapshotCleanup}
+             WHERE object_key = ${snapshotKey} AND state = 'queued'
+           )`,
+      sql`
+        DELETE FROM ${followingSnapshotCleanup}
+         WHERE object_key = ${snapshotKey} AND state = 'queued' AND EXISTS (
+           SELECT 1 FROM ${followingImports} AS import
+           JOIN ${users} AS user ON user.public_id = import.subject
+           WHERE import.subject = ${identity.subject}
+             AND import.lease_id = ${leaseID}
+             AND import.snapshot_key = ${snapshotKey}
+             AND import.status = 'ready'
+             AND user.id = ${identity.userID}
+             AND user.auth_version = ${identity.authVersion}
+             AND user.deletion_pending_at IS NULL
+         )`,
+      sql`
+        INSERT INTO ${followingSnapshotCleanup} (
+           object_key, state, attempt_count, lease_id, lease_expires_at,
+           available_at, last_error, created_at, updated_at
+         )
+         SELECT ${existing?.snapshot_key ?? null}, 'queued', 0, NULL, NULL,
+                ${now}, NULL, ${now}, ${now}
+         FROM ${followingImports} AS import
+         JOIN ${users} AS user ON user.public_id = import.subject
+         WHERE ${existing?.snapshot_key ?? null} IS NOT NULL
+           AND ${existing?.snapshot_key ?? null} <> ${snapshotKey}
+           AND import.subject = ${identity.subject}
+           AND import.lease_id = ${leaseID}
+           AND import.snapshot_key = ${snapshotKey}
+           AND import.status = 'ready'
+           AND user.id = ${identity.userID}
+           AND user.auth_version = ${identity.authVersion}
+           AND user.deletion_pending_at IS NULL
+         ON CONFLICT(object_key) DO NOTHING`,
+    ]);
+    if (
+      (published[0]?.meta.changes ?? 0) !== 1 ||
+      (published[1]?.meta.changes ?? 0) !== 1
+    ) {
       throw new FollowingImportError(
         "import_publication_failed",
         503,
         "The imported snapshot could not be published.",
       );
     }
+    publishedSnapshot = true;
 
     if (existing?.snapshot_key && existing.snapshot_key !== snapshotKey) {
-      await bindings.COMINAVI_FOLLOWING_SNAPSHOTS.delete(existing.snapshot_key);
+      await deleteQueuedSnapshot(
+        bindings.COMINAVI_DB,
+        bindings.COMINAVI_FOLLOWING_SNAPSHOTS,
+        existing.snapshot_key,
+      ).catch(() => undefined);
     }
     return { ...snapshot, source: "twitterapi.io" };
   } catch (error) {
+    if (!publishedSnapshot && snapshotKey) {
+      await deleteQueuedSnapshot(
+        bindings.COMINAVI_DB,
+        bindings.COMINAVI_FOLLOWING_SNAPSHOTS,
+        snapshotKey,
+      ).catch(() => undefined);
+    }
     const code =
       error instanceof TwitterFollowingError ||
       error instanceof FollowingImportError
         ? error.code
         : "import_failed";
-    await bindings.COMINAVI_DB.prepare(
-      `UPDATE following_imports
-       SET status = 'failed', last_error = ?1
-       WHERE subject = ?2 AND lease_id = ?3`,
-    )
-      .bind(code, identity.subject, leaseID)
-      .run();
+    await createDatabase(bindings.COMINAVI_DB).run(sql`
+      UPDATE ${followingImports}
+       SET status = 'failed', last_error = ${code}
+       WHERE subject = ${identity.subject} AND lease_id = ${leaseID}
+         AND EXISTS (
+           SELECT 1 FROM ${users}
+           WHERE ${users.id} = ${identity.userID}
+             AND ${users.publicID} = ${identity.subject}
+             AND ${users.authVersion} = ${identity.authVersion}
+             AND ${users.deletionPendingAt} IS NULL
+         )`);
 
     if (error instanceof FollowingImportError) throw error;
     if (error instanceof TwitterFollowingError) {
@@ -191,47 +296,248 @@ export async function importFollowingSnapshot(
 
 async function acquireLease(
   database: D1Database,
-  subject: string,
+  identity: CominaviIdentity,
   userName: string,
   leaseID: string,
   now: number,
   nextAllowedAt: number,
 ): Promise<boolean> {
-  const inserted = await database
-    .prepare(
-      `INSERT OR IGNORE INTO following_imports (
+  const db = createDatabase(database);
+  const inserted = await db.run(sql`
+      INSERT OR IGNORE INTO ${followingImports} (
          subject, twitter_username, status, lease_id, attempted_at, next_allowed_at,
          successful_at, snapshot_key, following_count, last_error
-       ) VALUES (?1, ?2, 'fetching', ?3, ?4, ?5, NULL, NULL, 0, NULL)`,
-    )
-    .bind(subject, userName, leaseID, now, nextAllowedAt)
-    .run();
+       )
+       SELECT ${identity.subject}, ${userName}, 'fetching', ${leaseID}, ${now},
+              ${nextAllowedAt}, NULL, NULL, 0, NULL
+       FROM ${users}
+       WHERE ${users.id} = ${identity.userID}
+         AND ${users.publicID} = ${identity.subject}
+         AND ${users.authVersion} = ${identity.authVersion}
+         AND ${users.deletionPendingAt} IS NULL`);
   if ((inserted.meta.changes ?? 0) === 1) return true;
 
-  const updated = await database
-    .prepare(
-      `UPDATE following_imports
-       SET twitter_username = ?1, status = 'fetching', lease_id = ?2,
-           attempted_at = ?3, next_allowed_at = ?4, last_error = NULL
-       WHERE subject = ?5 AND next_allowed_at <= ?3`,
-    )
-    .bind(userName, leaseID, now, nextAllowedAt, subject)
-    .run();
+  const updated = await db.run(sql`
+      UPDATE ${followingImports}
+       SET twitter_username = ${userName}, status = 'fetching',
+           lease_id = ${leaseID}, attempted_at = ${now},
+           next_allowed_at = ${nextAllowedAt}, last_error = NULL
+       WHERE subject = ${identity.subject} AND next_allowed_at <= ${now}
+         AND EXISTS (
+           SELECT 1 FROM ${users}
+           WHERE ${users.id} = ${identity.userID}
+             AND ${users.publicID} = ${identity.subject}
+             AND ${users.authVersion} = ${identity.authVersion}
+             AND ${users.deletionPendingAt} IS NULL
+         )`);
   return (updated.meta.changes ?? 0) === 1;
 }
 
 async function loadRow(
   database: D1Database,
-  subject: string,
+  identity: CominaviIdentity,
 ): Promise<FollowingImportRow | null> {
-  return database
-    .prepare(
-      `SELECT subject, twitter_username, status, lease_id, attempted_at, next_allowed_at,
-              successful_at, snapshot_key, following_count, last_error
-       FROM following_imports WHERE subject = ?1`,
+  const row = await createDatabase(database)
+    .select({
+      subject: followingImports.subject,
+      twitterUserName: followingImports.twitterUsername,
+      status: followingImports.status,
+      leaseID: followingImports.leaseID,
+      attemptedAt: followingImports.attemptedAt,
+      nextAllowedAt: followingImports.nextAllowedAt,
+      successfulAt: followingImports.successfulAt,
+      snapshotKey: followingImports.snapshotKey,
+      followingCount: followingImports.followingCount,
+      lastError: followingImports.lastError,
+    })
+    .from(followingImports)
+    .innerJoin(users, eq(users.publicID, followingImports.subject))
+    .where(
+      and(
+        eq(followingImports.subject, identity.subject),
+        eq(users.id, identity.userID),
+        eq(users.authVersion, identity.authVersion),
+        isNull(users.deletionPendingAt),
+      ),
     )
-    .bind(subject)
-    .first<FollowingImportRow>();
+    .get();
+  return row
+    ? {
+        subject: row.subject,
+        twitter_username: row.twitterUserName,
+        status: row.status,
+        lease_id: row.leaseID,
+        attempted_at: row.attemptedAt,
+        next_allowed_at: row.nextAllowedAt,
+        successful_at: row.successfulAt,
+        snapshot_key: row.snapshotKey,
+        following_count: row.followingCount,
+        last_error: row.lastError,
+      }
+    : null;
+}
+
+async function assertImportAuthority(
+  database: D1Database,
+  identity: CominaviIdentity,
+): Promise<void> {
+  const active = await createDatabase(database)
+    .select({ active: users.id })
+    .from(users)
+    .where(
+      and(
+        eq(users.id, identity.userID),
+        eq(users.publicID, identity.subject),
+        eq(users.authVersion, identity.authVersion),
+        isNull(users.deletionPendingAt),
+      ),
+    )
+    .get();
+  if (!active) throw unavailableImport();
+}
+
+async function deleteQueuedSnapshot(
+  database: D1Database,
+  snapshots: KVNamespace,
+  objectKey: string,
+): Promise<void> {
+  await snapshots.delete(objectKey);
+  await createDatabase(database)
+    .delete(followingSnapshotCleanup)
+    .where(eq(followingSnapshotCleanup.objectKey, objectKey))
+    .run();
+}
+
+export async function processFollowingSnapshotCleanup(
+  database: D1Database,
+  snapshots: KVNamespace,
+  nowMilliseconds = Date.now(),
+): Promise<number> {
+  const now = Math.floor(nowMilliseconds / 1_000);
+  const db = createDatabase(database);
+  const queued = await db
+    .select({
+      objectKey: followingSnapshotCleanup.objectKey,
+      attemptCount: followingSnapshotCleanup.attemptCount,
+    })
+    .from(followingSnapshotCleanup)
+    .where(
+      or(
+        and(
+          eq(followingSnapshotCleanup.state, "queued"),
+          lte(followingSnapshotCleanup.availableAt, now),
+        ),
+        and(
+          eq(followingSnapshotCleanup.state, "leased"),
+          lte(followingSnapshotCleanup.leaseExpiresAt, now),
+        ),
+      ),
+    )
+    .orderBy(
+      asc(followingSnapshotCleanup.availableAt),
+      asc(followingSnapshotCleanup.createdAt),
+    )
+    .limit(20);
+  let completed = 0;
+  for (const item of queued) {
+    const leaseID = crypto.randomUUID();
+    const leased = await db
+      .update(followingSnapshotCleanup)
+      .set({
+        state: "leased",
+        leaseID,
+        leaseExpiresAt: now + 60,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(followingSnapshotCleanup.objectKey, item.objectKey),
+          or(
+            and(
+              eq(followingSnapshotCleanup.state, "queued"),
+              lte(followingSnapshotCleanup.availableAt, now),
+            ),
+            and(
+              eq(followingSnapshotCleanup.state, "leased"),
+              lte(followingSnapshotCleanup.leaseExpiresAt, now),
+            ),
+          ),
+        ),
+      )
+      .run();
+    if ((leased.meta.changes ?? 0) !== 1) continue;
+    try {
+      const readyImport = db
+        .select({ ready: followingImports.subject })
+        .from(followingImports)
+        .where(
+          and(
+            eq(followingImports.snapshotKey, item.objectKey),
+            eq(followingImports.status, "ready"),
+          ),
+        );
+      const authorized = await db
+        .select({ authorized: followingSnapshotCleanup.objectKey })
+        .from(followingSnapshotCleanup)
+        .where(
+          and(
+            eq(followingSnapshotCleanup.objectKey, item.objectKey),
+            eq(followingSnapshotCleanup.state, "leased"),
+            eq(followingSnapshotCleanup.leaseID, leaseID),
+            notExists(readyImport),
+          ),
+        )
+        .get();
+      if (!authorized) {
+        await db
+          .delete(followingSnapshotCleanup)
+          .where(
+            and(
+              eq(followingSnapshotCleanup.objectKey, item.objectKey),
+              eq(followingSnapshotCleanup.leaseID, leaseID),
+              exists(readyImport),
+            ),
+          )
+          .run();
+        continue;
+      }
+      await snapshots.delete(item.objectKey);
+      await db
+        .delete(followingSnapshotCleanup)
+        .where(
+          and(
+            eq(followingSnapshotCleanup.objectKey, item.objectKey),
+            eq(followingSnapshotCleanup.leaseID, leaseID),
+          ),
+        )
+        .run();
+      completed += 1;
+    } catch (error) {
+      await db
+        .update(followingSnapshotCleanup)
+        .set({
+          state: "queued",
+          attemptCount: sql`${followingSnapshotCleanup.attemptCount} + 1`,
+          leaseID: null,
+          leaseExpiresAt: null,
+          availableAt:
+            now + Math.min(3_600, 60 * 2 ** Math.min(item.attemptCount, 5)),
+          lastError: (error instanceof Error
+            ? error.message
+            : "snapshot_delete_failed"
+          ).slice(0, 500),
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(followingSnapshotCleanup.objectKey, item.objectKey),
+            eq(followingSnapshotCleanup.leaseID, leaseID),
+          ),
+        )
+        .run();
+    }
+  }
+  return completed;
 }
 
 async function loadSnapshot(
@@ -249,6 +555,14 @@ function cooldownError(nextAllowedAt: number): FollowingImportError {
     429,
     "Followings can only be imported once every six hours.",
     new Date(nextAllowedAt * 1_000).toISOString(),
+  );
+}
+
+function unavailableImport(): FollowingImportError {
+  return new FollowingImportError(
+    "import_unavailable",
+    401,
+    "The followings import is no longer authorized.",
   );
 }
 
