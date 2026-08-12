@@ -1,4 +1,5 @@
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
+import * as Sentry from "@sentry/hono/cloudflare";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { generateOpenAPIDocument } from "./openapi";
@@ -36,6 +37,31 @@ const realtimeUpdatesCDNCacheControl =
 
 export function createHomepageApp(astroFetch: AstroFetch) {
   const app = new Hono<{ Bindings: Cloudflare.Env }>();
+
+  app.use(
+    Sentry.sentry(app, {
+      dsn: "https://5366d55254bddce30ce78749ace96c70@o4508052459225088.ingest.us.sentry.io/4511898103709696",
+      tracesSampleRate: 1.0,
+      enableLogs: true,
+      dataCollection: {
+        userInfo: true,
+        httpBodies: [
+          "incomingRequest",
+          "outgoingRequest",
+          "incomingResponse",
+          "outgoingResponse",
+        ],
+      },
+    }),
+  );
+
+  app.get("/debug-sentry", () => {
+    Sentry.logger.info("User triggered test error", {
+      action: "test_error_endpoint",
+    });
+    Sentry.metrics.count("test_counter", 1);
+    throw new Error("My first Sentry error!");
+  });
 
   app.get("/api/openapi.json", async (context) => {
     return context.json(await generateOpenAPIDocument(), 200, {
