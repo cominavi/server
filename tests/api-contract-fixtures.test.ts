@@ -324,9 +324,12 @@ test("dynamic app and API routes run before the static asset edge", () => {
 
 test("join capabilities are never cached, referred, or indexed", () => {
   const source = readFileSync("src/pages/join/[token].astro", "utf8");
+  const robots = readFileSync("public/robots.txt", "utf8");
   assert.match(source, /Cache-Control", "no-store/);
   assert.match(source, /Referrer-Policy", "no-referrer/);
   assert.match(source, /X-Robots-Tag", "noindex, nofollow, noarchive/);
+  assert.match(robots, /^User-agent:\s*\*\s*$/m);
+  assert.match(robots, /^Disallow:\s*\/join\/\s*$/m);
   assert.match(source, /invitation\.expiresAt/);
   assert.match(source, /invitation\.inviter\.displayName/);
   assert.match(source, /invitation\.inviter\.avatarURL/);
