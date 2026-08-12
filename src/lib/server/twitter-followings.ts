@@ -23,7 +23,12 @@ export class TwitterFollowingError extends Error {
   }
 }
 
-const maximumPages = 100;
+export const maximumTwitterFollowings = 5_000;
+
+const twitterFollowingPageSize = 200;
+const maximumPages = maximumTwitterFollowings / twitterFollowingPageSize;
+const twitterFollowingLimitMessage =
+  "This X account follows more than 5,000 people. ComiNavi can import up to 5,000 accounts.";
 
 export function normalizeTwitterUserName(value: string): string | null {
   const normalized = value.trim().replace(/^@/, "");
@@ -70,7 +75,7 @@ export async function fetchTwitterFollowings(
     );
     url.searchParams.set("userName", normalizedUserName);
     url.searchParams.set("cursor", cursor);
-    url.searchParams.set("pageSize", "200");
+    url.searchParams.set("pageSize", String(twitterFollowingPageSize));
 
     let response: Response;
     try {
@@ -98,9 +103,18 @@ export async function fetchTwitterFollowings(
       );
     }
 
+    if (pageNumber === maximumPages - 1 && body.has_next_page) {
+      throw twitterFollowingLimitError();
+    }
+
     for (const rawUser of body.followings) {
       const user = parseFollowingUser(rawUser);
-      if (user && !usersByID.has(user.id)) usersByID.set(user.id, user);
+      if (user && !usersByID.has(user.id)) {
+        usersByID.set(user.id, user);
+        if (usersByID.size > maximumTwitterFollowings) {
+          throw twitterFollowingLimitError();
+        }
+      }
     }
 
     if (!body.has_next_page) {
@@ -115,9 +129,13 @@ export async function fetchTwitterFollowings(
     cursor = body.next_cursor;
   }
 
-  throw new TwitterFollowingError(
-    "twitter_api_result_too_large",
-    "The account follows too many users to import safely in one request.",
+  throw twitterFollowingLimitError();
+}
+
+function twitterFollowingLimitError(): TwitterFollowingError {
+  return new TwitterFollowingError(
+    "twitter_following_limit_exceeded",
+    twitterFollowingLimitMessage,
   );
 }
 

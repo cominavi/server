@@ -135,6 +135,40 @@ test("a failed account switch retains but never mislabels the prior snapshot", a
   );
 });
 
+test("returns a typed 422 error when the X following limit is exceeded", async () => {
+  const database = setup();
+  const snapshots = new FakeKV();
+  const bindings: FollowingImportBindings = {
+    COMINAVI_DB: database.binding,
+    COMINAVI_FOLLOWING_SNAPSHOTS: snapshots as unknown as KVNamespace,
+    TWITTERAPI_IO_API_KEY: "key",
+  };
+
+  await assert.rejects(
+    importFollowingSnapshot(identity, "owner", bindings, 1_000_000, async () =>
+      Response.json({
+        status: "success",
+        followings: Array.from({ length: 5_001 }, (_, index) => ({
+          id: String(index),
+          userName: `circle_${index}`,
+        })),
+        has_next_page: false,
+      }),
+    ),
+    (error: unknown) =>
+      error instanceof FollowingImportError &&
+      error.status === 422 &&
+      error.code === "twitter_following_limit_exceeded" &&
+      error.message ===
+        "This X account follows more than 5,000 people. ComiNavi can import up to 5,000 accounts.",
+  );
+  assert.deepEqual(
+    database.rows("SELECT status, last_error FROM following_imports"),
+    [{ status: "failed", last_error: "twitter_following_limit_exceeded" }],
+  );
+  assert.equal(snapshots.size, 0);
+});
+
 test("postpublication failure deleting the prior KV snapshot preserves the new ready cache", async () => {
   const database = setup();
   const snapshots = new FakeKV();

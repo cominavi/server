@@ -102,3 +102,29 @@ test("fails closed when TwitterAPI.io repeats a cursor", async () => {
       error.code === "twitter_api_pagination_error",
   );
 });
+
+test("stops after page 25 when TwitterAPI.io reports another following page", async () => {
+  let requests = 0;
+  const fetcher: typeof fetch = async () => {
+    requests += 1;
+    return Response.json({
+      status: "success",
+      followings: Array.from({ length: 200 }, (_, index) => ({
+        id: String((requests - 1) * 200 + index),
+        userName: `circle_${(requests - 1) * 200 + index}`,
+      })),
+      has_next_page: true,
+      next_cursor: String(requests),
+    });
+  };
+
+  await assert.rejects(
+    fetchTwitterFollowings("owner", "api-key", fetcher),
+    (error: unknown) =>
+      error instanceof TwitterFollowingError &&
+      error.code === "twitter_following_limit_exceeded" &&
+      error.message ===
+        "This X account follows more than 5,000 people. ComiNavi can import up to 5,000 accounts.",
+  );
+  assert.equal(requests, 25);
+});

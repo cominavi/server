@@ -280,7 +280,7 @@ export async function importFollowingSnapshot(
     if (error instanceof TwitterFollowingError) {
       throw new FollowingImportError(
         error.code,
-        502,
+        error.code === "twitter_following_limit_exceeded" ? 422 : 502,
         error.message,
         new Date(nextAllowedAt * 1_000).toISOString(),
       );
