@@ -48,18 +48,24 @@ installation before discarding the service session.
 
 ## Realtime updates
 
-`GET /api/v2/events/{eventNumber}/updates` is a public, query-free endpoint. It
-returns every immutable update for the Comiket in one JSON representation,
-ordered by ascending cursor. Each event contains the source post, all retained
-media (including shinagaki and covers), and every WCID target, so A+B and
-one-account-many mappings remain explicit.
+`GET /api/v2/events/{eventNumber}/updates` is public. The query-free form
+returns every immutable update for backward compatibility. New clients start
+with `?afterCursor=0`, persist the last returned cursor, and request later pages
+with `?afterCursor={cursor}`. Incremental pages are bounded to 500 updates and
+report `hasMore`; clients continue from the last update while it is true. Each
+event contains the source post, all retained media (including shinagaki and
+covers), and every WCID target, so A+B and one-account-many mappings remain
+explicit.
 
-The stable URL and response body are shared at Cloudflare's edge. Browsers may
-reuse the snapshot for 60 seconds; Cloudflare serves stale data while one
-request revalidates in the background and may retain the last good snapshot
-during a short origin outage. The endpoint emits a content-derived ETag and
-honors `If-None-Match`. Query parameters are rejected so filters and cursors
-cannot fragment or poison the shared cache key.
+The stable full URL and canonical `afterCursor` page URLs are shared at
+Cloudflare's edge. Browsers may reuse a response for 60 seconds; Cloudflare
+serves stale data while one request revalidates in the background and may
+retain the last good response during a short origin outage. Every response
+emits a content-derived ETag and honors `If-None-Match`. Unknown, duplicated,
+negative, or non-canonical cursor queries are rejected without caching so they
+cannot poison the shared cache. The fixed page boundary lets fresh installs
+converge on the same edge-cache keys instead of inventing client-selected page
+sizes.
 
 State heads are a projection, not the audit log. They advance by source post
 time, source revision, then event key. Late or duplicate webhooks therefore

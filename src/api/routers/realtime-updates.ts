@@ -4,6 +4,11 @@ import { loadRealtimeUpdates } from "../../lib/server/realtime-api";
 import { publicProcedure } from "../core";
 
 const eventNumberSchema = z.coerce.number().int().positive().max(10_000);
+const realtimeCursorSchema = z.coerce
+  .number()
+  .int()
+  .nonnegative()
+  .max(Number.MAX_SAFE_INTEGER);
 
 const realtimeMediaSchema = z.object({
   key: z.string().min(1).max(500),
@@ -65,6 +70,7 @@ const realtimeUpdateSchema = z.object({
 
 const realtimeSnapshotSchema = z.object({
   eventNumber: z.number().int().positive().max(10_000),
+  hasMore: z.boolean(),
   updates: z.array(realtimeUpdateSchema),
 });
 
@@ -124,13 +130,14 @@ export const listRealtimeUpdates = publicProcedure
     operationId: "listRealtimeUpdates",
     summary: "Get realtime event updates",
     description:
-      "Returns one cacheable JSON representation containing every immutable realtime circle update for one Comiket, in ascending cursor order.",
+      "Returns immutable realtime circle updates in ascending cursor order. The query-free representation remains a complete snapshot for older clients; afterCursor returns a cacheable page of newer updates.",
     tags: ["Realtime"],
     inputStructure: "detailed",
   })
   .input(
     z.object({
       params: z.object({ eventNumber: eventNumberSchema }),
+      query: z.object({ afterCursor: realtimeCursorSchema.optional() }),
     }),
   )
   .output(realtimeSnapshotSchema)
@@ -139,6 +146,7 @@ export const listRealtimeUpdates = publicProcedure
     const result = await loadRealtimeUpdates(
       context.env.COMINAVI_DB,
       eventNumber,
+      input.query.afterCursor,
     );
     return {
       ...result,

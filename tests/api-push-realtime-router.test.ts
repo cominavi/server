@@ -52,7 +52,7 @@ test("push and realtime routers publish non-nullable OpenAPI contracts", async (
   }>;
   assert.deepEqual(
     updateParameters.map((parameter) => parameter.name),
-    ["eventNumber"],
+    ["eventNumber", "afterCursor"],
   );
   assert.doesNotMatch(JSON.stringify(document), /"nullable"/);
   assert.doesNotMatch(JSON.stringify(document), /"null"/);
@@ -118,7 +118,7 @@ test("push-device transport registers and idempotently disables an installation"
   );
 });
 
-test("realtime transport returns every event update in one public snapshot", async () => {
+test("realtime transport preserves the complete snapshot and pages after a cursor", async () => {
   const database = serviceDatabase();
   seedRealtimeUpdates(database);
   const env = serviceEnvironment(database);
@@ -130,6 +130,7 @@ test("realtime transport returns every event update in one public snapshot", asy
   assert.equal(response.status, 200, await response.clone().text());
   const body = await response.json<{
     eventNumber: number;
+    hasMore: boolean;
     updates: Array<{
       cursor: number;
       post: { media: unknown[] };
@@ -137,6 +138,7 @@ test("realtime transport returns every event update in one public snapshot", asy
     }>;
   }>();
   assert.equal(body.eventNumber, 108);
+  assert.equal(body.hasMore, false);
   assert.deepEqual(
     body.updates.map((update) => update.cursor),
     [1, 2, 3],
@@ -157,7 +159,62 @@ test("realtime transport returns every event update in one public snapshot", asy
       payloadSHA256: "d".repeat(64),
     },
   ]);
-  assert.deepEqual(Object.keys(body).sort(), ["eventNumber", "updates"]);
+  assert.deepEqual(Object.keys(body).sort(), [
+    "eventNumber",
+    "hasMore",
+    "updates",
+  ]);
+
+  const incremental = await dispatch(
+    new Request("https://cominavi.net/api/v2/events/108/updates?afterCursor=1"),
+    env,
+  );
+  assert.equal(incremental.status, 200, await incremental.clone().text());
+  const page = await incremental.json<{
+    hasMore: boolean;
+    updates: Array<{ cursor: number }>;
+  }>();
+  assert.equal(page.hasMore, false);
+  assert.deepEqual(
+    page.updates.map((update) => update.cursor),
+    [2, 3],
+  );
+});
+
+test("realtime transport bounds incremental pages and exposes continuation", async () => {
+  const database = serviceDatabase();
+  seedRealtimeUpdates(database);
+  seedAdditionalRealtimeUpdates(database, 501);
+  const env = serviceEnvironment(database);
+
+  const first = await dispatch(
+    new Request("https://cominavi.net/api/v2/events/108/updates?afterCursor=0"),
+    env,
+  );
+  const firstPage = await first.json<{
+    hasMore: boolean;
+    updates: Array<{ cursor: number }>;
+  }>();
+  assert.equal(firstPage.hasMore, true);
+  assert.equal(firstPage.updates.length, 500);
+  assert.equal(firstPage.updates[0]?.cursor, 1);
+  assert.equal(firstPage.updates.at(-1)?.cursor, 500);
+
+  const next = await dispatch(
+    new Request(
+      "https://cominavi.net/api/v2/events/108/updates?afterCursor=500",
+    ),
+    env,
+  );
+  const nextPage = await next.json<{
+    hasMore: boolean;
+    updates: Array<{ cursor: number }>;
+  }>();
+  assert.equal(nextPage.hasMore, false);
+  assert.deepEqual(
+    nextPage.updates.map((update) => update.cursor),
+    [501, 502, 503, 504],
+  );
 });
 
 test("homepage serves the canonical snapshot with SWR headers and ETag revalidation", async () => {
@@ -196,6 +253,27 @@ test("homepage serves the canonical snapshot with SWR headers and ETag revalidat
   assert.equal(unchanged.headers.get("ETag"), etag);
   assert.equal(await unchanged.text(), "");
 
+  const incremental = await app.fetch(
+    new Request(`${url}?afterCursor=1`),
+    env,
+    executionContext,
+  );
+  assert.equal(incremental.status, 200, await incremental.clone().text());
+  assert.equal(
+    incremental.headers.get("Cache-Control"),
+    "public, max-age=60, stale-while-revalidate=60, stale-if-error=86400",
+  );
+  assert.match(
+    incremental.headers.get("ETag") ?? "",
+    /^"sha256-[0-9a-f]{64}"$/,
+  );
+  assert.deepEqual(
+    (
+      await incremental.json<{ updates: Array<{ cursor: number }> }>()
+    ).updates.map((update) => update.cursor),
+    [2, 3],
+  );
+
   const rejected = await app.fetch(
     new Request(`${url}?after=1`),
     env,
@@ -205,8 +283,16 @@ test("homepage serves the canonical snapshot with SWR headers and ETag revalidat
   assert.equal(rejected.headers.get("Cache-Control"), "private, no-store");
   assert.deepEqual(await rejected.json(), {
     error: "invalid_realtime_query",
-    message: "Realtime updates use one query-free event URL.",
+    message: "Realtime updates accept only one canonical afterCursor value.",
   });
+
+  const noncanonical = await app.fetch(
+    new Request(`${url}?afterCursor=01`),
+    env,
+    executionContext,
+  );
+  assert.equal(noncanonical.status, 400);
+  assert.equal(noncanonical.headers.get("Cache-Control"), "private, no-store");
 });
 
 async function dispatch(
@@ -392,4 +478,40 @@ function seedRealtimeUpdates(database: SQLiteD1Database): void {
     INSERT INTO circle_update_targets (update_event_id, comiket_no, wc_id)
     VALUES (1, 108, 101), (2, 108, 102), (3, 108, 101);
   `);
+}
+
+function seedAdditionalRealtimeUpdates(
+  database: SQLiteD1Database,
+  count: number,
+): void {
+  const insertPost = database.native.prepare(`
+    INSERT INTO social_posts (
+      post_id, author_handle, text, occurred_at, latest_observed_at, raw_post_json
+    ) VALUES (?, 'circle_one', ?, ?, ?, '{}')
+  `);
+  const insertEvent = database.native.prepare(`
+    INSERT INTO circle_update_events (
+      event_key, ingest_batch_id, source, source_revision, post_id,
+      update_kind, state_kind, state_value, confidence, occurred_at,
+      evidence_json, created_at
+    ) VALUES (?, 1, 'fixture', 1, ?, 'presence_present', 'presence',
+              'present', 'high', ?, '{}', ?)
+  `);
+  const insertTarget = database.native.prepare(`
+    INSERT INTO circle_update_targets (update_event_id, comiket_no, wc_id)
+    VALUES (?, 108, 101)
+  `);
+  for (let offset = 0; offset < count; offset += 1) {
+    const sequence = offset + 4;
+    const postID = `post-${sequence}`;
+    const occurredAt = 1_700_001_000 + offset;
+    insertPost.run(postID, `Update ${sequence}`, occurredAt, occurredAt);
+    const result = insertEvent.run(
+      `event-${sequence}`,
+      postID,
+      occurredAt,
+      occurredAt,
+    );
+    insertTarget.run(Number(result.lastInsertRowid));
+  }
 }

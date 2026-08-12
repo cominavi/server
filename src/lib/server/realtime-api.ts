@@ -1,4 +1,4 @@
-import { and, eq, exists, sql } from "drizzle-orm";
+import { and, eq, exists, gt, sql } from "drizzle-orm";
 
 import {
   circles,
@@ -29,11 +29,15 @@ interface UpdateRow {
   mediaJSON: string;
 }
 
+const incrementalPageSize = 500;
+
 export async function loadRealtimeUpdates(
   database: D1Database,
   eventNumber: number,
+  afterCursor?: number,
 ): Promise<{
   eventNumber: number;
+  hasMore: boolean;
   updates: unknown[];
 }> {
   const db = createDatabase(database);
@@ -83,34 +87,50 @@ export async function loadRealtimeUpdates(
     FROM ${postMedia}
     WHERE ${postMedia.postID} = ${circleUpdateEvents.postID}
   ), '[]')`;
-  const rows: UpdateRow[] = await db
-    .select({
-      id: circleUpdateEvents.id,
-      eventKey: circleUpdateEvents.eventKey,
-      updateKind: circleUpdateEvents.updateKind,
-      stateKind: circleUpdateEvents.stateKind,
-      stateValue: circleUpdateEvents.stateValue,
-      confidence: circleUpdateEvents.confidence,
-      occurredAt: circleUpdateEvents.occurredAt,
-      sourceRevision: circleUpdateEvents.sourceRevision,
-      postID: socialPosts.postID,
-      postURL: socialPosts.postURL,
-      text: socialPosts.text,
-      authorXUserID: socialPosts.authorXUserID,
-      authorHandle: socialPosts.authorHandle,
-      authorName: socialPosts.authorName,
-      authorProfileImageURL: socialPosts.authorProfileImageURL,
-      targetsJSON,
-      mediaJSON,
-    })
-    .from(circleUpdateEvents)
-    .innerJoin(socialPosts, eq(socialPosts.postID, circleUpdateEvents.postID))
-    .where(exists(matchingTarget))
-    .orderBy(circleUpdateEvents.id);
+  const query = () =>
+    db
+      .select({
+        id: circleUpdateEvents.id,
+        eventKey: circleUpdateEvents.eventKey,
+        updateKind: circleUpdateEvents.updateKind,
+        stateKind: circleUpdateEvents.stateKind,
+        stateValue: circleUpdateEvents.stateValue,
+        confidence: circleUpdateEvents.confidence,
+        occurredAt: circleUpdateEvents.occurredAt,
+        sourceRevision: circleUpdateEvents.sourceRevision,
+        postID: socialPosts.postID,
+        postURL: socialPosts.postURL,
+        text: socialPosts.text,
+        authorXUserID: socialPosts.authorXUserID,
+        authorHandle: socialPosts.authorHandle,
+        authorName: socialPosts.authorName,
+        authorProfileImageURL: socialPosts.authorProfileImageURL,
+        targetsJSON,
+        mediaJSON,
+      })
+      .from(circleUpdateEvents)
+      .innerJoin(socialPosts, eq(socialPosts.postID, circleUpdateEvents.postID))
+      .where(
+        and(
+          exists(matchingTarget),
+          afterCursor === undefined
+            ? undefined
+            : gt(circleUpdateEvents.id, afterCursor),
+        ),
+      )
+      .orderBy(circleUpdateEvents.id);
+  const rows: UpdateRow[] =
+    afterCursor === undefined
+      ? await query()
+      : await query().limit(incrementalPageSize + 1);
+  const hasMore =
+    afterCursor !== undefined && rows.length > incrementalPageSize;
+  const pageRows = hasMore ? rows.slice(0, incrementalPageSize) : rows;
 
   return {
     eventNumber,
-    updates: rows.map((row) => ({
+    hasMore,
+    updates: pageRows.map((row) => ({
       cursor: row.id,
       eventKey: row.eventKey,
       updateKind: row.updateKind,

@@ -110,11 +110,12 @@ export function createHomepageApp(astroFetch: AstroFetch) {
   });
 
   app.get("/api/v2/events/:eventNumber/updates", (context) => {
-    if (new URL(context.req.url).search.length > 0) {
+    if (!isCacheableRealtimeUpdatesURL(new URL(context.req.url))) {
       return context.json(
         {
           error: "invalid_realtime_query",
-          message: "Realtime updates use one query-free event URL.",
+          message:
+            "Realtime updates accept only one canonical afterCursor value.",
         },
         400,
         {
@@ -220,8 +221,8 @@ async function withCanonicalJSONHeaders(
   if (
     request.method === "GET" &&
     response.status === 200 &&
-    url.search.length === 0 &&
-    realtimeUpdatesPathPattern.test(url.pathname)
+    realtimeUpdatesPathPattern.test(url.pathname) &&
+    isCacheableRealtimeUpdatesURL(url)
   ) {
     const body = await response.arrayBuffer();
     const etag = await responseETag(body);
@@ -257,6 +258,16 @@ async function withCanonicalJSONHeaders(
     statusText: response.statusText,
     headers,
   });
+}
+
+function isCacheableRealtimeUpdatesURL(url: URL): boolean {
+  if (url.search.length === 0) return true;
+  const entries = Array.from(url.searchParams.entries());
+  if (entries.length !== 1 || entries[0]?.[0] !== "afterCursor") return false;
+  const value = entries[0][1];
+  if (!/^(?:0|[1-9]\d*)$/.test(value)) return false;
+  const cursor = Number(value);
+  return Number.isSafeInteger(cursor) && cursor >= 0;
 }
 
 async function responseETag(body: ArrayBuffer): Promise<string> {
