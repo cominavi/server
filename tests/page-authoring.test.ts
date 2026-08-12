@@ -10,6 +10,10 @@ test("the homepage body is server-rendered from TSX with all seven features", ()
   const markup = renderToStaticMarkup(createElement(HomePage));
   assert.match(markup, /<main class="home">/);
   assert.equal(markup.match(/class="feature-item"/g)?.length, 7);
+  assert.match(
+    markup,
+    /aria-label="ComiNavi ホーム"><img src="\/cominavi-app-icon\.png" alt="" width="1024" height="1024"\/><span>ComiNavi<\/span>/,
+  );
   assert.match(markup, /コミケ非公式<wbr\/>ナビゲーション<wbr\/>アプリ/);
   assert.match(
     markup,

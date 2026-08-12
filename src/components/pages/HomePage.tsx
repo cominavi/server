@@ -125,9 +125,14 @@ export default function HomePage() {
     <main className="home">
       <section className="home-hero" id="top">
         <header className="home-nav">
-          <a className="home-wordmark" href="#top" aria-label="コミナビ ホーム">
-            <Icon name="compass" />
-            <span>COMINAVI</span>
+          <a className="home-wordmark" href="#top" aria-label="ComiNavi ホーム">
+            <img
+              src="/cominavi-app-icon.png"
+              alt=""
+              width="1024"
+              height="1024"
+            />
+            <span>ComiNavi</span>
           </a>
           <nav aria-label="ページ内ナビゲーション">
             <a href="#features">できること</a>
