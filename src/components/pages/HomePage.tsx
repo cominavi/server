@@ -4,6 +4,7 @@ type IconName =
   | "arrow-right"
   | "bookmark"
   | "compass"
+  | "external-link"
   | "list-checks"
   | "navigation"
   | "route"
@@ -17,6 +18,10 @@ type Feature = {
   icon: IconName;
   number: string;
   title: string[];
+};
+
+type HomePageProps = {
+  testFlightURL: string;
 };
 
 const phases: Array<{
@@ -120,7 +125,7 @@ function Phrase({ children }: { children: string[] }) {
   );
 }
 
-export default function HomePage() {
+export default function HomePage({ testFlightURL }: HomePageProps) {
   return (
     <main className="home">
       <section className="home-hero" id="top">
@@ -145,7 +150,9 @@ export default function HomePage() {
           <div className="home-hero__copy">
             <h1>
               <span className="cjk-phrase">
-                調べるところから、
+                調べる
+                <wbr />
+                ところから、
                 <wbr />
                 迷わず会える
                 <span className="home-compact-break">
@@ -165,11 +172,24 @@ export default function HomePage() {
               そして、会場でたどり着く。コミナビは、コミケの準備から当日までをひとつの道筋につなぎます。
             </p>
             <div className="home-hero__actions">
-              <a className="home-primary-action" href="#features">
-                <span>できることを見る</span>
-                <Icon name="arrow-right" />
+              <a
+                className="home-primary-action"
+                href={testFlightURL}
+                aria-label="TestFlight で ComiNavi を試す（外部サイト）"
+              >
+                <span className="home-primary-action__copy">
+                  <span>iPhone / iPad</span>
+                  <strong>TestFlight で試す</strong>
+                </span>
+                <Icon name="external-link" />
               </a>
-              <p>開発中 · iPhone + iPad</p>
+              <div className="home-hero__action-meta">
+                <p>開発中のベータ版です</p>
+                <a href="#features">
+                  <span>できることを見る</span>
+                  <Icon name="arrow-right" />
+                </a>
+              </div>
             </div>
           </div>
 

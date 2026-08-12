@@ -7,7 +7,10 @@ import HomePage from "../src/components/pages/HomePage";
 import PrivacyPage from "../src/components/pages/PrivacyPage";
 
 test("the homepage body is server-rendered from TSX with all seven features", () => {
-  const markup = renderToStaticMarkup(createElement(HomePage));
+  const testFlightURL = "https://testflight.apple.com/join/HrDC1xuC";
+  const markup = renderToStaticMarkup(
+    createElement(HomePage, { testFlightURL }),
+  );
   assert.match(markup, /<main class="home">/);
   assert.equal(markup.match(/class="feature-item"/g)?.length, 7);
   assert.match(
@@ -21,6 +24,12 @@ test("the homepage body is server-rendered from TSX with all seven features", ()
   );
   assert.match(markup, /class="home-shared__live-phrase"/);
   assert.match(markup, /変更をリアルタイムで共有/);
+  assert.match(
+    markup,
+    /href="https:\/\/testflight\.apple\.com\/join\/HrDC1xuC"/,
+  );
+  assert.match(markup, /TestFlight で試す/);
+  assert.match(markup, /開発中のベータ版です/);
   assert.match(markup, /プライバシー \/ Privacy/);
 });
 
@@ -38,7 +47,10 @@ test("Astro pages are thin zero-hydration wrappers around TSX", async () => {
     readFile(new URL("../src/pages/index.astro", import.meta.url), "utf8"),
     readFile(new URL("../src/pages/privacy.astro", import.meta.url), "utf8"),
   ]);
-  assert.match(home, /<HomePage \/>/);
+  assert.match(
+    home,
+    /<HomePage testFlightURL=\{env\.COMINAVI_TESTFLIGHT_URL\} \/>/,
+  );
   assert.match(privacy, /<PrivacyPage \/>/);
   assert.doesNotMatch(`${home}\n${privacy}`, /client:/);
 });

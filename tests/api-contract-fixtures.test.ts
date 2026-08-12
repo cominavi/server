@@ -340,11 +340,22 @@ test("join capabilities are never cached, referred, or indexed", () => {
 
 test("join page sends beta testers to the current TestFlight build", () => {
   const pageSource = readFileSync("src/pages/join/[token].astro", "utf8");
+  const homeSource = readFileSync("src/pages/index.astro", "utf8");
+  const homeComponentSource = readFileSync(
+    "src/components/pages/HomePage.tsx",
+    "utf8",
+  );
   const wranglerSource = readFileSync("wrangler.jsonc", "utf8");
   assert.match(pageSource, /env\.COMINAVI_TESTFLIGHT_URL/);
+  assert.match(homeSource, /env\.COMINAVI_TESTFLIGHT_URL/);
+  assert.match(homeComponentSource, /href=\{testFlightURL\}/);
+  assert.match(homeComponentSource, /TestFlight で試す/);
   assert.match(pageSource, /TestFlight で試す/);
   assert.match(pageSource, /TestFlight を開く/);
-  assert.doesNotMatch(pageSource, /App Store/);
+  assert.doesNotMatch(
+    `${homeSource}\n${homeComponentSource}\n${pageSource}`,
+    /App Store/,
+  );
   assert.match(
     wranglerSource,
     /"COMINAVI_TESTFLIGHT_URL": "https:\/\/testflight\.apple\.com\/join\/HrDC1xuC"/,

@@ -1,11 +1,12 @@
 ---
+import { env } from "cloudflare:workers";
 import HomePage from "../components/pages/HomePage";
 import "../home.css";
 import Layout from "../layouts/Layout.astro";
 ---
 
 <Layout>
-  <HomePage />
+  <HomePage testFlightURL={env.COMINAVI_TESTFLIGHT_URL} />
 </Layout>
 
 <script>
