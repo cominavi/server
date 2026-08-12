@@ -10,10 +10,10 @@ importers:
     dependencies:
       '@astrojs/cloudflare':
         specifier: ^14.1.4
-        version: 14.1.4(astro@7.1.3(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2)(jiti@2.7.0)(rollup@4.21.3)(tsx@4.19.1)(yaml@2.9.0))(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(wrangler@4.112.0(@cloudflare/workers-types@5.20260721.1))(yaml@2.9.0)
+        version: 14.1.4(@types/node@26.2.0)(astro@7.1.3(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2)(@types/node@26.2.0)(jiti@2.7.0)(rollup@4.21.3)(tsx@4.19.1)(yaml@2.9.0))(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(wrangler@4.112.0(@cloudflare/workers-types@5.20260721.1))(yaml@2.9.0)
       '@astrojs/react':
         specifier: ^6.0.2
-        version: 6.0.2(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(esbuild@0.28.1)(jiti@2.7.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tsx@4.19.1)(yaml@2.9.0)
+        version: 6.0.2(@types/node@26.2.0)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(esbuild@0.28.1)(jiti@2.7.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tsx@4.19.1)(yaml@2.9.0)
       '@automerge/automerge':
         specifier: 3.2.6
         version: 3.2.6
@@ -37,7 +37,7 @@ importers:
         version: 10.70.0(@cloudflare/workers-types@5.20260721.1)(@sentry/cloudflare@10.70.0(@cloudflare/workers-types@5.20260721.1)(wrangler@4.112.0(@cloudflare/workers-types@5.20260721.1)))(hono@4.13.1)
       astro:
         specifier: ^7.1.3
-        version: 7.1.3(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2)(jiti@2.7.0)(rollup@4.21.3)(tsx@4.19.1)(yaml@2.9.0)
+        version: 7.1.3(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2)(@types/node@26.2.0)(jiti@2.7.0)(rollup@4.21.3)(tsx@4.19.1)(yaml@2.9.0)
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@5.20260721.1)(@opentelemetry/api@1.9.1)
@@ -60,6 +60,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^5.20260721.1
         version: 5.20260721.1
+      '@types/node':
+        specifier: ^26.2.0
+        version: 26.2.0
       '@types/react':
         specifier: ^19.2.18
         version: 19.2.18
@@ -1811,6 +1814,9 @@ packages:
   '@types/nlcst@2.0.3':
     resolution: {integrity: sha512-vSYNSDe6Ix3q+6Z7ri9lyWqgGhJTmzRjZRqyq15N0Z/1/UnVsno9G/N40NBijoYx2seFDIl0+B2mgAb9mezUCA==}
 
+  '@types/node@26.2.0':
+    resolution: {integrity: sha512-5IviulTZeRNp2vAJ514cc/HUlY5nZ9fCbq9DMyC52BrhFZACo3nI0R7qBxhQmo/d27NFe96ur/b7Wwxklda+kg==}
+
   '@types/react-dom@19.2.4':
     resolution: {integrity: sha512-Bsc+QHgp+P/F02XDzNCY9jnZNCUuLki36KT7VKrTXXLdHf+vHMNZnW1rVu5DNW/rCK+fya3DATySbLM4yhtKUw==}
     peerDependencies:
@@ -2856,6 +2862,9 @@ packages:
   uncrypto@0.1.3:
     resolution: {integrity: sha512-Ql87qFHB3s/De2ClA9e0gsnS6zXG27SkTiSJwjCc9MebbfapQfuPzumMIUMi38ezPZVNFcHI9sUIepeQfw8J8Q==}
 
+  undici-types@8.3.0:
+    resolution: {integrity: sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==}
+
   undici@7.28.0:
     resolution: {integrity: sha512-cRZYrTDwWznlnRiPjggAGxZXanty6M8RV1ff8Wm4LWXBp7/IG8v5DnOm74DtUBp9OONpK75YlPnIjQqX0dBDtA==}
     engines: {node: '>=20.18.1'}
@@ -3240,14 +3249,14 @@ snapshots:
       - prettier
       - prettier-plugin-astro
 
-  '@astrojs/cloudflare@14.1.4(astro@7.1.3(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2)(jiti@2.7.0)(rollup@4.21.3)(tsx@4.19.1)(yaml@2.9.0))(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(wrangler@4.112.0(@cloudflare/workers-types@5.20260721.1))(yaml@2.9.0)':
+  '@astrojs/cloudflare@14.1.4(@types/node@26.2.0)(astro@7.1.3(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2)(@types/node@26.2.0)(jiti@2.7.0)(rollup@4.21.3)(tsx@4.19.1)(yaml@2.9.0))(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(wrangler@4.112.0(@cloudflare/workers-types@5.20260721.1))(yaml@2.9.0)':
     dependencies:
       '@astrojs/internal-helpers': 0.10.1
       '@astrojs/underscore-redirects': 1.0.3
-      '@cloudflare/vite-plugin': 1.45.1(vite@8.1.5(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0))(wrangler@4.112.0(@cloudflare/workers-types@5.20260721.1))
-      astro: 7.1.3(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2)(jiti@2.7.0)(rollup@4.21.3)(tsx@4.19.1)(yaml@2.9.0)
+      '@cloudflare/vite-plugin': 1.45.1(vite@8.1.5(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0))(wrangler@4.112.0(@cloudflare/workers-types@5.20260721.1))
+      astro: 7.1.3(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2)(@types/node@26.2.0)(jiti@2.7.0)(rollup@4.21.3)(tsx@4.19.1)(yaml@2.9.0)
       piccolore: 0.1.3
-      vite: 8.1.5(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0)
+      vite: 8.1.5(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0)
       wrangler: 4.112.0(@cloudflare/workers-types@5.20260721.1)
     transitivePeerDependencies:
       - '@types/node'
@@ -3381,17 +3390,17 @@ snapshots:
     dependencies:
       prismjs: 1.30.0
 
-  '@astrojs/react@6.0.2(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(esbuild@0.28.1)(jiti@2.7.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tsx@4.19.1)(yaml@2.9.0)':
+  '@astrojs/react@6.0.2(@types/node@26.2.0)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(esbuild@0.28.1)(jiti@2.7.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tsx@4.19.1)(yaml@2.9.0)':
     dependencies:
       '@astrojs/internal-helpers': 0.10.2
       '@types/react': 19.2.18
       '@types/react-dom': 19.2.4(@types/react@19.2.18)
-      '@vitejs/plugin-react': 5.2.0(vite@8.1.5(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0))
+      '@vitejs/plugin-react': 5.2.0(vite@8.1.5(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0))
       devalue: 5.8.2
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
       ultrahtml: 1.7.0
-      vite: 8.1.5(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0)
+      vite: 8.1.5(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0)
     transitivePeerDependencies:
       - '@types/node'
       - '@vitejs/devtools'
@@ -3598,12 +3607,12 @@ snapshots:
     optionalDependencies:
       workerd: 1.20260714.1
 
-  '@cloudflare/vite-plugin@1.45.1(vite@8.1.5(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0))(wrangler@4.112.0(@cloudflare/workers-types@5.20260721.1))':
+  '@cloudflare/vite-plugin@1.45.1(vite@8.1.5(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0))(wrangler@4.112.0(@cloudflare/workers-types@5.20260721.1))':
     dependencies:
       '@cloudflare/unenv-preset': 2.16.1(unenv@2.0.0-rc.24)(workerd@1.20260714.1)
       miniflare: 4.20260714.0
       unenv: 2.0.0-rc.24
-      vite: 8.1.5(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0)
+      vite: 8.1.5(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0)
       workerd: 1.20260714.1
       wrangler: 4.112.0(@cloudflare/workers-types@5.20260721.1)
       ws: 8.21.0
@@ -4626,6 +4635,10 @@ snapshots:
     dependencies:
       '@types/unist': 3.0.3
 
+  '@types/node@26.2.0':
+    dependencies:
+      undici-types: 8.3.0
+
   '@types/react-dom@19.2.4(@types/react@19.2.18)':
     dependencies:
       '@types/react': 19.2.18
@@ -4638,7 +4651,7 @@ snapshots:
 
   '@ungap/structured-clone@1.3.3': {}
 
-  '@vitejs/plugin-react@5.2.0(vite@8.1.5(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0))':
+  '@vitejs/plugin-react@5.2.0(vite@8.1.5(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0))':
     dependencies:
       '@babel/core': 7.29.7
       '@babel/plugin-transform-react-jsx-self': 7.29.7(@babel/core@7.29.7)
@@ -4646,7 +4659,7 @@ snapshots:
       '@rolldown/pluginutils': 1.0.0-rc.3
       '@types/babel__core': 7.20.5
       react-refresh: 0.18.0
-      vite: 8.1.5(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0)
+      vite: 8.1.5(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -4736,7 +4749,7 @@ snapshots:
 
   astring@1.9.0: {}
 
-  astro@7.1.3(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2)(jiti@2.7.0)(rollup@4.21.3)(tsx@4.19.1)(yaml@2.9.0):
+  astro@7.1.3(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2)(@types/node@26.2.0)(jiti@2.7.0)(rollup@4.21.3)(tsx@4.19.1)(yaml@2.9.0):
     dependencies:
       '@astrojs/compiler-rs': 0.3.1(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.2)
       '@astrojs/internal-helpers': 0.10.1
@@ -4786,13 +4799,13 @@ snapshots:
       ultrahtml: 1.7.0
       unifont: 0.7.4
       unstorage: 1.17.5
-      vite: 8.1.5(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0)
-      vitefu: 1.1.3(vite@8.1.5(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0))
+      vite: 8.1.5(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0)
+      vitefu: 1.1.3(vite@8.1.5(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0))
       xxhash-wasm: 1.1.0
       yargs-parser: 22.0.0
       zod: 4.4.3
     optionalDependencies:
-      sharp: 0.35.3
+      sharp: 0.35.3(@types/node@26.2.0)
     transitivePeerDependencies:
       - '@azure/app-configuration'
       - '@azure/cosmos'
@@ -5631,7 +5644,7 @@ snapshots:
       '@img/sharp-win32-ia32': 0.34.5
       '@img/sharp-win32-x64': 0.34.5
 
-  sharp@0.35.3:
+  sharp@0.35.3(@types/node@26.2.0):
     dependencies:
       '@img/colour': 1.1.0
       detect-libc: 2.1.2
@@ -5662,6 +5675,7 @@ snapshots:
       '@img/sharp-win32-arm64': 0.35.3
       '@img/sharp-win32-ia32': 0.35.3
       '@img/sharp-win32-x64': 0.35.3
+      '@types/node': 26.2.0
     optional: true
 
   shiki@4.3.1:
@@ -5772,6 +5786,8 @@ snapshots:
 
   uncrypto@0.1.3: {}
 
+  undici-types@8.3.0: {}
+
   undici@7.28.0: {}
 
   unenv@2.0.0-rc.24:
@@ -5849,7 +5865,7 @@ snapshots:
       '@types/unist': 3.0.3
       vfile-message: 4.0.3
 
-  vite@8.1.5(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0):
+  vite@8.1.5(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.5
@@ -5857,15 +5873,16 @@ snapshots:
       rolldown: 1.1.5
       tinyglobby: 0.2.17
     optionalDependencies:
+      '@types/node': 26.2.0
       esbuild: 0.28.1
       fsevents: 2.3.3
       jiti: 2.7.0
       tsx: 4.19.1
       yaml: 2.9.0
 
-  vitefu@1.1.3(vite@8.1.5(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0)):
+  vitefu@1.1.3(vite@8.1.5(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0)):
     optionalDependencies:
-      vite: 8.1.5(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0)
+      vite: 8.1.5(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.19.1)(yaml@2.9.0)
 
   volar-service-css@0.0.71(@volar/language-service@2.4.28):
     dependencies:
