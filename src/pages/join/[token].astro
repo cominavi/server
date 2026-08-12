@@ -77,8 +77,12 @@ const inviterInitial = invitation
               <span class="invite-title__plan">{invitation.planName}</span>
               <span class="invite-title__action">に参加</span>
             </h1>
-            <p class="invite-content__lead">
-              サークル、メモ、購入予定を共有して、みんなの「行きたい」を当日の動けるプランへ。
+            <p class="invite-content__lead cjk-phrase">
+              サークル、メモ、購入予定を共有して、
+              <wbr />
+              みんなの「行きたい」を
+              <wbr />
+              当日の動けるプランへ。
             </p>
 
             <div class="invite-context" aria-label="招待の詳細">
@@ -155,8 +159,7 @@ const inviterInitial = invitation
                 <use href="#icon-shield-check" />
               </svg>
               <span>
-                参加前にアプリでサインインし、あなた自身の表示名とアバターを確認します。
-                この招待リンクは特定の受取人に固定されていません。
+                参加前にアプリでサインインし、あなた自身の表示名とアバターを確認します。この招待リンクは特定の受取人に固定されていません。
               </span>
             </p>
           </div>
@@ -180,8 +183,7 @@ const inviterInitial = invitation
           <div class="invite-content">
             <h1 id="invite-title">この招待は利用できません</h1>
             <p class="invite-content__lead">
-              リンクが無効、有効期限切れ、または取り消された可能性があります。
-              招待した人に新しいリンクを確認してください。
+              リンクが無効、有効期限切れ、または取り消された可能性があります。招待した人に新しいリンクを確認してください。
             </p>
             <div class="invite-actions">
               <a class="invite-action invite-action--primary" href="/">
@@ -352,6 +354,7 @@ const inviterInitial = invitation
   }
 
   .invite-content .invite-title {
+    padding-bottom: 8px;
     overflow-wrap: normal;
     text-wrap: wrap;
     word-break: normal;
@@ -391,6 +394,7 @@ const inviterInitial = invitation
     color: var(--invite-muted);
     font-size: clamp(1rem, 1.5vw, 1.08rem);
     line-height: 1.9;
+    text-wrap: pretty;
   }
 
   .invite-context {
@@ -561,6 +565,7 @@ const inviterInitial = invitation
     color: var(--invite-muted);
     font-size: 0.78rem;
     line-height: 1.75;
+    text-wrap: pretty;
   }
 
   .invite-privacy svg {

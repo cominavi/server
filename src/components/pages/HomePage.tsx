@@ -23,11 +23,11 @@ const phases: Array<{
   description: string;
   features: Feature[];
   number: string;
-  title: string;
+  title: string[];
 }> = [
   {
     number: "01",
-    title: "行く前に、ちゃんと調べる。",
+    title: ["行く前に、", "ちゃんと", "調べる。"],
     description:
       "まだ知らないサークルに出会い、気になる場所を自分の言葉で残す。カタログを見る時間を、当日のための確かな準備に変えます。",
     features: [
@@ -67,7 +67,7 @@ const phases: Array<{
   },
   {
     number: "02",
-    title: "会場で、迷わずまわる。",
+    title: ["会場で、", "迷わず", "まわる。"],
     description:
       "広い会場でも、見たい情報だけを手元に。保存したサークルと現在地を結び、次に向かう場所をすぐ判断できます。",
     features: [
@@ -143,7 +143,9 @@ export default function HomePage() {
                 調べるところから、
                 <wbr />
                 迷わず会える
-                <br className="home-mobile-break" />
+                <span className="home-compact-break">
+                  <wbr />
+                </span>
                 ところまで。
               </span>
             </h1>
@@ -215,16 +217,22 @@ export default function HomePage() {
 
       <section className="home-thought" aria-label="コミナビの思い">
         <Icon name="sparkles" />
-        <p>
-          好きなものに会える一日は、
-          <br />
-          準備の時間から始まっている。
+        <p className="cjk-phrase">
+          好きなものに
+          <wbr />
+          会える一日は、
+          <wbr />
+          準備の時間から
+          <wbr />
+          始まっている。
         </p>
       </section>
 
       <section className="home-features" id="features">
         <header className="home-features__intro">
-          <h2>一日の流れに、必要な道具を。</h2>
+          <h2>
+            <Phrase children={["一日の流れに、", "必要な道具を。"]} />
+          </h2>
           <p>
             機能を増やすためではなく、次に何をすればいいかが自然に見えるために。
             調べる時間と歩く時間を、同じ感覚でつなぎます。
@@ -235,7 +243,9 @@ export default function HomePage() {
           <section className="home-phase" key={phase.number}>
             <header className="home-phase__header">
               <span>{phase.number}</span>
-              <h3>{phase.title}</h3>
+              <h3>
+                <Phrase children={phase.title} />
+              </h3>
               <p>{phase.description}</p>
             </header>
             <ol className="home-feature-list">
@@ -287,9 +297,8 @@ export default function HomePage() {
             </span>
           </h2>
           <p>
-            Shared Plans
-            では、行きたいサークル、メモ、購入予定を仲間とリアルタイムに共有。
-            誰かの変更がすぐに届くから、それぞれの「欲しい」と「買いに行ける」を、いつでも同じ計画で確かめられます。
+            <span lang="en">Shared Plans</span>
+            では、行きたいサークル、メモ、購入予定を仲間とリアルタイムに共有。誰かの変更がすぐに届くから、それぞれの「欲しい」と「買いに行ける」を、いつでも同じ計画で確かめられます。
           </p>
           <ul>
             <li>

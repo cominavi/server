@@ -113,7 +113,7 @@
   line-height: 1.12;
 }
 
-.home-mobile-break {
+.home-compact-break {
   display: none;
 }
 
@@ -132,6 +132,7 @@
   font-size: clamp(1rem, 1.35vw, 1.18rem);
   font-weight: 500;
   line-height: 2;
+  text-wrap: pretty;
 }
 
 .home-hero__live,
@@ -296,6 +297,7 @@
   color: var(--home-muted);
   font-size: 0.78rem;
   line-height: 1.75;
+  text-wrap: pretty;
 }
 
 .home-thought {
@@ -327,6 +329,7 @@
   font-weight: 700;
   letter-spacing: -0.035em;
   line-height: 1.65;
+  text-wrap: pretty;
 }
 
 .home-features {
@@ -360,6 +363,7 @@
   color: var(--home-muted);
   font-size: 0.98rem;
   line-height: 1.95;
+  text-wrap: pretty;
 }
 
 .home-phase {
@@ -405,6 +409,7 @@
   color: var(--home-muted);
   font-size: 0.92rem;
   line-height: 1.9;
+  text-wrap: pretty;
 }
 
 .home-feature-list {
@@ -466,6 +471,7 @@
   color: var(--home-muted);
   font-size: 0.94rem;
   line-height: 1.95;
+  text-wrap: pretty;
 }
 
 .feature-item__body ul {
@@ -558,6 +564,7 @@
   color: var(--home-muted);
   font-size: 1rem;
   line-height: 2;
+  text-wrap: pretty;
 }
 
 .home-shared__content ul {
@@ -608,6 +615,7 @@
   color: var(--home-muted);
   font-size: 0.8rem;
   line-height: 1.8;
+  text-wrap: pretty;
 }
 
 .home-footer > p {
@@ -617,6 +625,7 @@
   border-top: 1px solid var(--home-line);
   color: #757c72;
   font-size: 0.68rem;
+  text-wrap: pretty;
 }
 
 .home a:focus-visible {
@@ -722,8 +731,8 @@
     line-height: 1.14;
   }
 
-  .home-mobile-break {
-    display: block;
+  .home-compact-break {
+    display: inline;
   }
 
   .home-hero__lead {
@@ -837,6 +846,7 @@
 
   .home-shared__content li {
     min-height: 4.5rem;
+    padding-inline: 0.75rem;
     border-top: 1px solid var(--home-line);
     border-left: 0;
   }

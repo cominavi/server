@@ -60,7 +60,10 @@ a {
 }
 
 :lang(ja) {
+  font-kerning: normal;
   line-break: strict;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .cjk-phrase {
@@ -512,6 +515,7 @@ h4.cjk-phrase,
   margin: 0;
   color: var(--muted);
   line-height: 1.85;
+  text-wrap: pretty;
 }
 
 .privacy__hero dl {
@@ -570,6 +574,7 @@ h4.cjk-phrase,
   margin: 0.8rem 0 0;
   color: var(--muted);
   line-height: 1.9;
+  text-wrap: pretty;
 }
 
 .privacy__sections a,

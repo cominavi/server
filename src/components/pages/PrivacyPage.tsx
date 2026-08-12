@@ -15,7 +15,13 @@ export default function PrivacyPage() {
       <article className="privacy__document">
         <header className="privacy__hero">
           <p className="privacy__eyebrow">PRIVACY / プライバシー</p>
-          <h1>プライバシーポリシー</h1>
+          <h1>
+            <span className="cjk-phrase">
+              プライバシー
+              <wbr />
+              ポリシー
+            </span>
+          </h1>
           <p>
             コミナビを安心して使っていただくため、取り扱う情報とその目的を説明します。
           </p>
@@ -145,8 +151,8 @@ export default function PrivacyPage() {
             <p>
               ComiNavi uses Sentry and PostHog to investigate errors, improve
               performance, and understand feature usage. App and device
-              information, usage events, crash data, and performance data may
-              be sent to these services. After sign-in, your Circle.ms user ID,
+              information, usage events, crash data, and performance data may be
+              sent to these services. After sign-in, your Circle.ms user ID,
               display name, and R18 display preference may be associated with
               diagnostic and analytics data. We do not use this data for
               advertising tracking and do not sell personal information.
