@@ -9,6 +9,11 @@ export default defineConfig({
   build: {
     redirects: false,
   },
+  vite: {
+    build: {
+      sourcemap: "hidden",
+    },
+  },
   adapter: cloudflare({
     imageService: "compile",
   }),

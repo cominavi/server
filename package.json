@@ -16,9 +16,10 @@
     "openapi:check": "tsx tools/generate-openapi.ts --output openapi/cominavi-openapi.json --check",
     "fixture:automerge": "tsx tools/generate-automerge-v1-fixture.ts --write",
     "seed:c108": "tsx tools/generate-realtime-seed.ts",
-    "deploy": "pnpm build && wrangler deploy",
+    "deploy": "pnpm build && pnpm sentry:sourcemaps && wrangler deploy",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "sentry:sourcemaps": "sentry-cli sourcemaps inject dist && sentry-cli sourcemaps upload --org=cominavi --project=cominavi-server --wait --strict dist && find dist -type f -name '*.map' -delete"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^14.1.4",
@@ -41,6 +42,7 @@
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
     "@cloudflare/workers-types": "^5.20260721.1",
+    "@sentry/cli": "^2.58.6",
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
