@@ -1,2 +1,4 @@
 User-agent: *
-Disallow: /join/
+Disallow:
+
+# Invitation pages must remain crawlable so their X-Robots-Tag can be honored.
