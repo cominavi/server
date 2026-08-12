@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createHomepageApp } from "../src/api/app";
+import { issueCominaviJWT } from "../src/lib/server/cominavi-auth";
 import { serveCatalogArtifact } from "../src/lib/server/catalog-download";
 import { SQLiteD1Database } from "./sqlite-d1";
 
@@ -122,12 +123,55 @@ test("catalog download operation authenticates before accessing private R2", asy
       `https://cominavi.net/api/v2/catalogs/108/versions/${versionID}/artifact`,
     ),
     {
-      COMINAVI_CATALOG_ARTIFACTS: bucket,
+      COMINAVI_CATALOG_DOWNLOADS: bucket,
     } as unknown as Cloudflare.Env,
     executionContext,
   );
   assert.equal(response.status, 401);
   assert.equal(bucketAccesses, 0);
+});
+
+test("authenticated catalog route streams resumable bytes only from the derived download bucket", async () => {
+  const database = setupPublishedCatalog();
+  const bucket = new RangeBucket(bytes);
+  const secret = "catalog-proxy-jwt-secret-longer-than-thirty-two-bytes";
+  const token = await issueCominaviJWT(
+    {
+      subject: "0123456789abcdef0123456789abcdef",
+      userID: 1,
+      authVersion: 1,
+    },
+    secret,
+  );
+  const app = createHomepageApp(() => new Response("astro"));
+  const response = await app.fetch(
+    new Request(
+      `https://cominavi.net/api/v2/catalogs/108/versions/${versionID}/artifact`,
+      {
+        headers: {
+          Authorization: `Bearer ${token.token}`,
+          Range: "bytes=2-5",
+          "If-Range": etag,
+        },
+      },
+    ),
+    {
+      COMINAVI_DB: database.binding,
+      COMINAVI_CATALOG_DOWNLOADS: bucket.binding,
+      COMINAVI_CATALOGS: {
+        get: async () => {
+          throw new Error("raw catalog bucket must not serve downloads");
+        },
+      },
+      COMINAVI_JWT_SECRET: secret,
+    } as unknown as Cloudflare.Env,
+    executionContext,
+  );
+
+  assert.equal(response.status, 206, await response.clone().text());
+  assert.equal(response.headers.get("Content-Range"), "bytes 2-5/16");
+  assert.equal(await response.text(), "2345");
+  assert.deepEqual(bucket.requests, [{ offset: 2, length: 4 }]);
 });
 
 const executionContext = {
@@ -151,6 +195,13 @@ function setupPublishedCatalog(): SQLiteD1Database {
       .join("\n"),
   );
   database.native.exec(`
+    INSERT INTO users (
+      id, public_id, display_name, auth_version, deletion_pending_at,
+      created_at, updated_at, last_authenticated_at
+    ) VALUES (
+      1, '0123456789abcdef0123456789abcdef', 'Catalog User', 1, NULL,
+      1, 1, 1
+    );
     INSERT INTO catalog_events (comiket_no, name, active_version_id, created_at, updated_at)
     VALUES (108, 'Comic Market 108', '${versionID}', 1, 1);
     INSERT INTO catalog_versions (
@@ -210,8 +261,10 @@ function objectBody(size: number, body: Uint8Array): R2ObjectBody {
     uploaded: new Date(0),
     version: "fixture",
     checksums: {},
-    customMetadata: {},
-    httpMetadata: {},
+    customMetadata: { sha256, visibility: "authenticated_download" },
+    httpMetadata: {
+      contentType: "application/vnd.cominavi.catalog-v1+sqlite",
+    },
     range: undefined,
     body: new Response(buffer).body!,
     bodyUsed: false,

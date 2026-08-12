@@ -37,7 +37,7 @@ export async function serveCatalogArtifact(
   }
   if (request.method === "HEAD") {
     const object = await bucket.head(artifact.object_key);
-    assertObject(object, artifact.byte_count);
+    assertObject(object, artifact);
     return new Response(null, { status: 200, headers });
   }
   const object = await bucket.get(
@@ -46,7 +46,7 @@ export async function serveCatalogArtifact(
       ? { range: { offset: range.start, length: range.length } }
       : undefined,
   );
-  assertObject(object, artifact.byte_count);
+  assertObject(object, artifact);
   if (range) {
     headers.set(
       "Content-Range",
@@ -107,9 +107,19 @@ function baseHeaders(
 
 function assertObject(
   object: R2Object | R2ObjectBody | null,
-  expectedSize: number,
+  artifact: {
+    byte_count: number;
+    content_type: string;
+    sha256: string;
+  },
 ): asserts object is R2ObjectBody {
-  if (!object || object.size !== expectedSize) {
+  if (
+    !object ||
+    object.size !== artifact.byte_count ||
+    object.httpMetadata?.contentType !== artifact.content_type ||
+    object.customMetadata?.sha256 !== artifact.sha256 ||
+    object.customMetadata?.visibility !== "authenticated_download"
+  ) {
     throw new ServiceError(
       "catalog_artifact_unavailable",
       503,

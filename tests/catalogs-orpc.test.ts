@@ -80,7 +80,7 @@ test("catalog oRPC routes list manifests and preserve resumable artifact behavio
   });
   const environment = {
     COMINAVI_DB: database.binding,
-    COMINAVI_CATALOGS: bucket.binding,
+    COMINAVI_CATALOG_DOWNLOADS: bucket.binding,
     COMINAVI_JWT_SECRET: secret,
   } as unknown as Cloudflare.Env;
   const fetchCatalog = async (path: string, init?: RequestInit) => {
@@ -252,8 +252,10 @@ function objectBody(size: number, body: Uint8Array): R2ObjectBody {
     uploaded: new Date(0),
     version: "fixture",
     checksums: {},
-    customMetadata: {},
-    httpMetadata: {},
+    customMetadata: { sha256, visibility: "authenticated_download" },
+    httpMetadata: {
+      contentType: "application/vnd.cominavi.catalog-v1+sqlite",
+    },
     range: undefined,
     body: new Response(buffer).body!,
     bodyUsed: false,

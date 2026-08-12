@@ -8,10 +8,6 @@ import { apiErrorResponse } from "../lib/server/api-response";
 import { authenticateRequestWithBindings } from "../lib/server/authenticated-request-core";
 import { assertPlanMember } from "../lib/server/shared-plans";
 import {
-  catalogDownloadCapabilityConfiguration,
-  catalogDownloadCapabilityRedirect,
-} from "../lib/server/catalog-download-capability";
-import {
   authenticateCrawlerRequest,
   parseCrawlerBatch,
 } from "../lib/server/crawler-ingest";
@@ -131,44 +127,6 @@ export function createHomepageApp(astroFetch: AstroFetch) {
     }
     return handleOpenAPIRequest(context);
   });
-
-  app.on(
-    ["GET", "HEAD"],
-    "/api/v2/catalogs/:comiketNo/versions/:versionID/artifact",
-    async (context) => {
-      try {
-        const configuration = catalogDownloadCapabilityConfiguration(
-          context.env,
-        );
-        if (!configuration) return handleOpenAPIRequest(context);
-        await authenticateRequestWithBindings(context.req.raw, context.env);
-        const comiketNo = Number(context.req.param("comiketNo"));
-        const versionID = context.req.param("versionID");
-        if (
-          !Number.isSafeInteger(comiketNo) ||
-          comiketNo < 1 ||
-          comiketNo > 10_000 ||
-          !/^[A-Za-z0-9._-]{1,160}$/.test(versionID)
-        ) {
-          return context.json(
-            { error: "bad_request", message: "The request is invalid." },
-            400,
-            { "Cache-Control": "private, no-store" },
-          );
-        }
-        return catalogDownloadCapabilityRedirect(
-          context.env.COMINAVI_DB,
-          context.env.COMINAVI_CATALOG_DOWNLOADS!,
-          comiketNo,
-          versionID,
-          context.req.method as "GET" | "HEAD",
-          configuration,
-        );
-      } catch (error) {
-        return apiErrorResponse(error);
-      }
-    },
-  );
 
   app.all("/api/v2", (context) => handleOpenAPIRequest(context));
   app.all("/api/v2/*", (context) => handleOpenAPIRequest(context));

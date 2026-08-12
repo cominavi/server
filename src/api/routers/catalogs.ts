@@ -215,7 +215,7 @@ export const downloadCatalogArtifact = authenticatedProcedure
     const response = await serveCatalogArtifact(
       context.request,
       context.env.COMINAVI_DB,
-      context.env.COMINAVI_CATALOGS,
+      context.env.COMINAVI_CATALOG_DOWNLOADS,
       input.params.comiketNo,
       input.params.versionID,
     );
@@ -279,7 +279,7 @@ export const headCatalogArtifact = authenticatedProcedure
     const response = await serveCatalogArtifact(
       context.request,
       context.env.COMINAVI_DB,
-      context.env.COMINAVI_CATALOGS,
+      context.env.COMINAVI_CATALOG_DOWNLOADS,
       input.params.comiketNo,
       input.params.versionID,
     );
