@@ -77,6 +77,10 @@
       "binding": "COMINAVI_CATALOGS",
       "bucket_name": "cominavi-catalogs-private",
     },
+    {
+      "binding": "COMINAVI_CATALOG_DOWNLOADS",
+      "bucket_name": "cominavi-catalog-downloads",
+    },
   ],
   "durable_objects": {
     "bindings": [

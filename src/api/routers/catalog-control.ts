@@ -412,6 +412,7 @@ async function handleCatalogMultipart(context: APIContext): Promise<{
     );
     await assertCatalogPublicationAuthority(context.env.COMINAVI_DB, command);
     if (matches(existing, command)) {
+      await mirrorDerivedCatalogArtifact(context.env, command);
       return { body: { alreadyComplete: true } };
     }
     if (existing) throw artifactConflict();
@@ -475,12 +476,37 @@ async function handleCatalogMultipart(context: APIContext): Promise<{
   const completed = await context.env.COMINAVI_CATALOGS.head(command.objectKey);
   await assertCatalogPublicationAuthority(context.env.COMINAVI_DB, command);
   if (!matches(completed, command)) throw artifactConflict();
+  await mirrorDerivedCatalogArtifact(context.env, command);
+  await assertCatalogPublicationAuthority(context.env.COMINAVI_DB, command);
   await completeCatalogMultipartUploadReceipt(
     context.env.COMINAVI_DB,
     command.objectKey,
     command.uploadID,
   );
   return { body: { completed: true } };
+}
+
+export async function mirrorDerivedCatalogArtifact(
+  env: Cloudflare.Env,
+  metadata: ArtifactMetadata,
+): Promise<void> {
+  if (metadata.visibility !== "authenticated_download") return;
+  const destination = env.COMINAVI_CATALOG_DOWNLOADS;
+  if (!destination) return;
+  const existing = await destination.head(metadata.objectKey);
+  if (matches(existing, metadata)) return;
+  if (existing) throw artifactConflict();
+  const source = await env.COMINAVI_CATALOGS.get(metadata.objectKey);
+  if (!source || !matches(source, metadata)) throw artifactConflict();
+  await destination.put(metadata.objectKey, source.body, {
+    httpMetadata: { contentType: metadata.contentType },
+    customMetadata: {
+      sha256: metadata.sha256,
+      visibility: metadata.visibility,
+    },
+  });
+  const mirrored = await destination.head(metadata.objectKey);
+  if (!matches(mirrored, metadata)) throw artifactConflict();
 }
 
 async function handleCatalogMultipartPart(
@@ -666,7 +692,7 @@ function parseRefreshCommand(bytes: Uint8Array): RefreshCommand {
   return value as RefreshCommand;
 }
 
-type ArtifactMetadata = {
+export type ArtifactMetadata = {
   objectKey: string;
   sha256: string;
   bytes: number;
