@@ -185,10 +185,12 @@ enter the durable D1 cleanup outbox and the scheduled Worker retries deletion.
 
 GitHub Actions deploys production after every push to `main`, with a manual
 `workflow_dispatch` fallback. The workflow installs the locked dependencies,
-runs the test suite and production build, applies pending remote D1 migrations,
-and then deploys the Worker. Deployments are serialized so two pushes cannot
-race the same production resources. This path intentionally does not run the
-Sentry source-map upload included in `pnpm deploy`.
+runs the test suite serially and the production build, applies pending remote
+D1 migrations, and then deploys the Worker. Cross-repository fixture parity is
+checked when the sibling repositories are available and remains part of the
+`meta` rollout gate. Deployments are serialized so two pushes cannot race the
+same production resources. This path intentionally does not run the Sentry
+source-map upload included in `pnpm deploy`.
 
 Configure one GitHub Actions repository secret named
 `CLOUDFLARE_API_TOKEN`. Start from Cloudflare's **Edit Cloudflare Workers**

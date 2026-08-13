@@ -9,6 +9,7 @@
     "build": "pnpm openapi:check && pnpm typegen && astro check && astro build",
     "check": "pnpm openapi:check && astro check",
     "test": "tsx --test tests/*.test.ts",
+    "test:ci": "tsx --test --test-concurrency=1 tests/*.test.ts",
     "catalog:import": "tsx tools/catalog-import.ts",
     "catalog:publish": "tsx tools/publish-catalog.ts",
     "catalog:refresh": "tsx tools/run-catalog-refresh.ts",

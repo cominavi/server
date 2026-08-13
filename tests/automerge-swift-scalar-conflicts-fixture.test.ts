@@ -1,7 +1,7 @@
 import * as Automerge from "@automerge/automerge";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 import {
   canonicalJSON,
@@ -25,8 +25,12 @@ test("all literal Swift scalar-conflict resolutions pass strict JS topology vali
   const fixtureBytes = readFileSync(fixturePath, "utf8");
   const fixture = JSON.parse(fixtureBytes) as SwiftScalarConflictFixture;
   assert.equal(digest(fixtureBytes), fixtureSHA256);
-  assert.equal(readFileSync(metaFixturePath, "utf8"), fixtureBytes);
-  assert.equal(readFileSync(iosFixturePath, "utf8"), fixtureBytes);
+  if (existsSync(metaFixturePath)) {
+    assert.equal(readFileSync(metaFixturePath, "utf8"), fixtureBytes);
+  }
+  if (existsSync(iosFixturePath)) {
+    assert.equal(readFileSync(iosFixturePath, "utf8"), fixtureBytes);
+  }
   assert.equal(
     fixture.sourceFixtureSHA256,
     digest(readFileSync(sourceFixturePath, "utf8")),
