@@ -67,14 +67,6 @@ export function createHomepageApp(astroFetch: AstroFetch) {
     }),
   );
 
-  app.get("/debug-sentry", () => {
-    Sentry.logger.info("User triggered test error", {
-      action: "test_error_endpoint",
-    });
-    Sentry.metrics.count("test_counter", 1);
-    throw new Error("My first Sentry error!");
-  });
-
   app.get("/api/openapi.json", async (context) => {
     return context.json(await generateOpenAPIDocument(), 200, {
       "Cache-Control": "public, max-age=300",
