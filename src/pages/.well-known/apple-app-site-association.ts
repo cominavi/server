@@ -18,6 +18,9 @@ export const GET: APIRoute = async () =>
           paths: ["/join/*", "/auth/google", "/auth/apple"],
         })),
       },
+      webcredentials: {
+        apps: ["F25GFFJL49.llc.mikunet.cominavi"],
+      },
     }),
     {
       headers: {

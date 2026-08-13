@@ -296,6 +296,7 @@ test("AASA is direct JSON for every supported app and deliberate entry path", as
   assert.equal(response.headers.get("Location"), null);
   const body = (await response.json()) as {
     applinks: { details: Array<{ appID: string; paths: string[] }> };
+    webcredentials: { apps: string[] };
   };
   assert.deepEqual(
     body.applinks.details.map((detail) => detail.appID),
@@ -309,6 +310,9 @@ test("AASA is direct JSON for every supported app and deliberate entry path", as
     "/join/*",
     "/auth/google",
     "/auth/apple",
+  ]);
+  assert.deepEqual(body.webcredentials.apps, [
+    "F25GFFJL49.llc.mikunet.cominavi",
   ]);
 });
 
