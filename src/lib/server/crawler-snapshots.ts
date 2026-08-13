@@ -1,14 +1,4 @@
-import {
-  and,
-  asc,
-  count,
-  eq,
-  inArray,
-  lte,
-  notExists,
-  or,
-  sql,
-} from "drizzle-orm";
+import { and, asc, eq, lte, notExists, or, sql } from "drizzle-orm";
 
 import { runDrizzleBatch } from "../db/batch";
 import { createDatabase } from "../db/client";
@@ -724,17 +714,16 @@ async function assertSnapshotCatalogTargets(
     ),
   ).sort((left, right) => left - right);
   if (wcIDs.length === 0) return;
-  const result = await createDatabase(database)
-    .select({ matched: count() })
-    .from(catalogStableCircles)
-    .where(
-      and(
-        eq(catalogStableCircles.comiketNo, snapshot.eventNumber),
-        inArray(catalogStableCircles.wcID, wcIDs),
-      ),
-    )
-    .get();
-  if (result?.matched !== wcIDs.length) {
+  const missing = await createDatabase(database).all<{ wc_id: number }>(sql`
+    SELECT CAST(requested.value AS INTEGER) AS wc_id
+    FROM json_each(${JSON.stringify(wcIDs)}) AS requested
+    LEFT JOIN ${catalogStableCircles} AS circle
+      ON circle.comiket_no = ${snapshot.eventNumber}
+     AND circle.wc_id = CAST(requested.value AS INTEGER)
+    WHERE circle.wc_id IS NULL
+    LIMIT 1
+  `);
+  if (missing.length > 0) {
     throw new ServiceError(
       "crawler_snapshot_unknown_circle",
       409,

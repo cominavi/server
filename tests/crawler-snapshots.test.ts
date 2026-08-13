@@ -101,8 +101,7 @@ test("snapshot publication preserves mixed-case handles and accepts RFC3339 offs
   const app = createHomepageApp(() => new Response("astro"));
   const publication = await fixturePublication();
   publication.snapshot.observedAt = "2026-08-15T03:00:00+00:00";
-  publication.snapshot.events[0]!.post.occurredAt =
-    "2026-08-15T03:00:00+00:00";
+  publication.snapshot.events[0]!.post.occurredAt = "2026-08-15T03:00:00+00:00";
   publication.snapshot.events[0]!.post.author.handle = "Sent_Kurokawa";
   publication.snapshot.revision = await calculateCrawlerSnapshotRevision(
     publication.snapshot,
@@ -312,7 +311,8 @@ test("snapshot revision, generation, canonical order, catalog and WCID fail clos
         bucket.binding,
         auth(badWCID, "snapshot:c108:g1:bad-wcid"),
       ),
-    (error: unknown) => hasCode(error, "crawler_snapshot_unknown_circle"),
+    (error: unknown) =>
+      hasCodeAndStatus(error, "crawler_snapshot_unknown_circle", 409),
   );
 
   const first = await publishCrawlerSnapshot(
@@ -331,6 +331,31 @@ test("snapshot revision, generation, canonical order, catalog and WCID fail clos
       ),
     (error: unknown) => hasCode(error, "crawler_snapshot_revision_conflict"),
   );
+});
+
+test("production-scale snapshot catalog validation stays within the D1 bind limit", async () => {
+  const database = setup();
+  seedCatalog(database);
+  const wcIDs = Array.from({ length: 4_698 }, (_, index) => 10_000 + index);
+  seedStableCatalogCircles(database, wcIDs);
+  const bucket = new MemoryBucket();
+  const publication = await fixturePublication();
+  publication.snapshot.events = productionScaleSnapshotEvents(
+    publication.snapshot.events[0]!,
+    wcIDs,
+  );
+  publication.snapshot.revision = await calculateCrawlerSnapshotRevision(
+    publication.snapshot,
+  );
+
+  const published = await publishCrawlerSnapshot(
+    enforceD1BindingLimit(database.binding, 100),
+    bucket.binding,
+    auth(publication, "snapshot:c108:g1:production-scale"),
+  );
+
+  assert.equal(published.revision, publication.snapshot.revision);
+  assert.equal(published.generation, 1);
 });
 
 test("publication cursor fences concurrent append and reset keeps non-artwork state", async () => {
@@ -909,6 +934,51 @@ function seedCatalog(database: SQLiteD1Database): void {
   `);
 }
 
+function seedStableCatalogCircles(
+  database: SQLiteD1Database,
+  wcIDs: readonly number[],
+): void {
+  const insert = database.native.prepare(`
+    INSERT INTO catalog_stable_circles (
+      comiket_no, wc_id, first_version_id, last_version_id,
+      first_published_at, last_published_at
+    ) VALUES (108, ?, 'c108-v1', 'c108-v1', 1, 1)
+  `);
+  database.native.exec("BEGIN");
+  try {
+    for (const wcID of wcIDs) insert.run(wcID);
+    database.native.exec("COMMIT");
+  } catch (error) {
+    database.native.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function productionScaleSnapshotEvents(
+  template: CrawlerRealtimeSnapshot["events"][number],
+  wcIDs: readonly number[],
+): CrawlerRealtimeSnapshot["events"] {
+  const events: CrawlerRealtimeSnapshot["events"] = [];
+  for (let offset = 0; offset < wcIDs.length; offset += 20) {
+    const event = structuredClone(template);
+    const eventIndex = offset / 20;
+    const postID = (2_090_000_000_000_100_000n + BigInt(eventIndex)).toString();
+    event.eventKey = `snapshot:shinagaki:${postID}:v4`;
+    event.sourceRevision = eventIndex + 1;
+    event.stateValue = postID;
+    event.post.id = postID;
+    event.post.url = `https://x.com/circle101/status/${postID}`;
+    event.circles = wcIDs.slice(offset, offset + 20).map((wcID) => ({
+      comiketNo: 108,
+      wcID,
+      circleID: wcID,
+      circleName: `Circle ${wcID}`,
+    }));
+    events.push(event);
+  }
+  return events;
+}
+
 function seedCatalogRollover(
   database: SQLiteD1Database,
   sourceMainSHA256: string,
@@ -1198,4 +1268,57 @@ function hasCode(error: unknown, code: string): boolean {
     "code" in error &&
     error.code === code
   );
+}
+
+function hasCodeAndStatus(
+  error: unknown,
+  code: string,
+  status: number,
+): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === code &&
+    "status" in error &&
+    error.status === status
+  );
+}
+
+function enforceD1BindingLimit(
+  database: D1Database,
+  maximumBindings: number,
+): D1Database {
+  return new Proxy(database, {
+    get(target, property) {
+      if (property === "prepare") {
+        return (query: string) => {
+          const statement = target.prepare(query);
+          return new Proxy(statement, {
+            get(statementTarget, statementProperty) {
+              if (statementProperty === "bind") {
+                return (...values: unknown[]) => {
+                  assert.ok(
+                    values.length <= maximumBindings,
+                    `D1 query binds ${values.length} values, exceeding the ${maximumBindings}-value limit.\nSQL: ${query}`,
+                  );
+                  return statementTarget.bind(...values);
+                };
+              }
+              const value = Reflect.get(
+                statementTarget,
+                statementProperty,
+                statementTarget,
+              );
+              return typeof value === "function"
+                ? value.bind(statementTarget)
+                : value;
+            },
+          });
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
