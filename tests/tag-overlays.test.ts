@@ -347,6 +347,7 @@ test("catalog authority is rechecked atomically after the R2 write", async () =>
   seedActiveCatalog(database);
   const bucket = new MemoryBucket();
   const overlay = await fixtureOverlay();
+  const publishedAt = Date.parse("2026-08-13T00:00:00Z");
   database.beforeNextBatch = () => {
     database.native.exec(`
       INSERT INTO catalog_versions (
@@ -371,6 +372,7 @@ test("catalog authority is rechecked atomically after the R2 write", async () =>
           publicationRequest(overlay, "none"),
           `tag-overlay:108:${overlay.revision}`,
         ),
+        publishedAt,
       ),
     (error: unknown) => hasCode(error, "tag_overlay_catalog_mismatch"),
   );
@@ -388,7 +390,7 @@ test("catalog authority is rechecked atomically after the R2 write", async () =>
     await processPendingCircleTagOverlayCleanup(
       database.binding,
       bucket.binding,
-      Date.parse("2026-08-13T01:00:00Z"),
+      publishedAt + 600_000,
     ),
     1,
   );

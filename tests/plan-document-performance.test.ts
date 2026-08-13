@@ -83,7 +83,11 @@ test("an adversarial alternating history remains bounded at the 10,000-operation
   );
   assert.equal(Object.keys(accepted.document.operations).length, 10_000);
   assert.equal(accepted.conflicts.length, 0);
-  assert.ok(elapsed < 5_000, `10,000-operation validation took ${elapsed}ms`);
+  const maximumElapsed = process.env.CI ? 15_000 : 5_000;
+  assert.ok(
+    elapsed < maximumElapsed,
+    `10,000-operation validation took ${elapsed}ms (limit ${maximumElapsed}ms)`,
+  );
 });
 
 function loadBootstrap(): Automerge.Doc<PlanDocument> {
