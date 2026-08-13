@@ -49,7 +49,7 @@ const selectedPostsPath = resolve(
   process.argv[3] ?? `${root}/collector/out/c108-enriched/selected-posts.json`,
 );
 const outputPath = resolve(
-  process.argv[4] ?? `${root}/homepage/seed/c108-realtime.sql`,
+  process.argv[4] ?? `${root}/server/seed/c108-realtime.sql`,
 );
 const metadataPath = resolve(
   process.argv[5] ?? `${root}/collector/out/catalog-seed/metadata.json`,

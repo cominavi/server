@@ -1,6 +1,7 @@
-# Cominavi Homepage
+# Cominavi Server
 
-The public website and Circle.ms OAuth endpoints for Cominavi, built with Astro and deployed as a Cloudflare Worker at [cominavi.net](https://cominavi.net).
+The public website and backend APIs for Cominavi, built with Astro and deployed
+as a Cloudflare Worker at [cominavi.net](https://cominavi.net).
 
 ## Setup
 
@@ -181,6 +182,20 @@ enter the durable D1 cleanup outbox and the scheduled Worker retries deletion.
 | `pnpm deploy`            | Build and deploy to Cloudflare Workers                     |
 
 ## Deployment
+
+GitHub Actions deploys production after every push to `main`, with a manual
+`workflow_dispatch` fallback. The workflow installs the locked dependencies,
+runs the test suite and production build, applies pending remote D1 migrations,
+and then deploys the Worker. Deployments are serialized so two pushes cannot
+race the same production resources. This path intentionally does not run the
+Sentry source-map upload included in `pnpm deploy`.
+
+Configure one GitHub Actions repository secret named
+`CLOUDFLARE_API_TOKEN`. Start from Cloudflare's **Edit Cloudflare Workers**
+token template, add account-level **D1 Edit** and **Queues Edit**, and limit the
+token to the `GalvinGao` account and `cominavi.net` zone. The non-secret account
+ID remains declared once in `wrangler.jsonc`. Existing Worker runtime secrets
+remain in Cloudflare and are not copied into GitHub Actions.
 
 The `cominavi.net` custom domain and its account ID are declared in
 `wrangler.jsonc`. Before invoking Wrangler, verify that its active account name

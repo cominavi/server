@@ -66,9 +66,9 @@ optional compatibility destination.
 ## Evidence on Hand
 
 - Existing public copy and seven factual capability descriptions in
-  `homepage/src/components/pages/HomePage.tsx`.
+  `server/src/components/pages/HomePage.tsx`.
 - Current invitation requirements and states in
-  `homepage/src/pages/join/[token].astro`.
+  `server/src/pages/join/[token].astro`.
 - The incumbent focused-action components in
   `ios/ComiNavi/DownloadProgressView.swift` and their use in catalog recovery
   and X followed-circle import flows.
