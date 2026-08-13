@@ -94,12 +94,19 @@ test("snapshot revision matches the collector cross-language vector", async () =
   );
 });
 
-test("snapshot publication uses its dedicated HMAC and exact replay receipt", async () => {
+test("snapshot publication preserves mixed-case handles and accepts RFC3339 offsets", async () => {
   const database = setup();
   seedCatalog(database);
   const bucket = new MemoryBucket();
   const app = createHomepageApp(() => new Response("astro"));
   const publication = await fixturePublication();
+  publication.snapshot.observedAt = "2026-08-15T03:00:00+00:00";
+  publication.snapshot.events[0]!.post.occurredAt =
+    "2026-08-15T03:00:00+00:00";
+  publication.snapshot.events[0]!.post.author.handle = "Sent_Kurokawa";
+  publication.snapshot.revision = await calculateCrawlerSnapshotRevision(
+    publication.snapshot,
+  );
   const body = JSON.stringify(publication);
   const idempotencyKey = "snapshot:c108:g1:fixture";
   const call = (secret: string, requestBody = body) => {
@@ -135,6 +142,16 @@ test("snapshot publication uses its dedicated HMAC and exact replay receipt", as
   assert.equal(first.generation, 1);
   assert.equal(first.publicationCursor, 0);
   assert.equal(first.duplicate, false);
+  const stored = await loadActiveCrawlerSnapshot(
+    database.binding,
+    bucket.binding,
+    108,
+    true,
+  );
+  assert.equal(
+    stored?.events?.[0]?.post.author.handle,
+    publication.snapshot.events[0]!.post.author.handle,
+  );
   assert.equal((await call(snapshotSecret)).status, 200);
 
   const tamperedPublication = structuredClone(publication);

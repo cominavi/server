@@ -200,7 +200,7 @@ export async function parseCrawlerSnapshotPublication(
     throw invalidSnapshot("The snapshot does not match schema version 1.");
   }
 
-  const events = source.events.map(parseCrawlerEvent);
+  const events = source.events.map(parseCrawlerSnapshotEvent);
   for (let index = 0; index < events.length; index += 1) {
     const event = events[index]!;
     if (
@@ -251,6 +251,30 @@ export async function parseCrawlerSnapshotPublication(
     );
   }
   return { baseRevision: String(value.baseRevision), snapshot };
+}
+
+function parseCrawlerSnapshotEvent(value: unknown): CrawlerEvent {
+  const event = parseCrawlerEvent(value);
+  if (
+    !isRecord(value) ||
+    !isRecord(value.post) ||
+    !isRecord(value.post.author) ||
+    typeof value.post.author.handle !== "string"
+  ) {
+    throw invalidSnapshot("The snapshot event author is invalid.");
+  }
+  return {
+    ...event,
+    post: {
+      ...event.post,
+      author: {
+        ...event.post.author,
+        // Snapshot revisions cover the collector's canonical semantic content.
+        // Incremental ingress keeps its existing lowercase normalization.
+        handle: value.post.author.handle,
+      },
+    },
+  };
 }
 
 export async function publishCrawlerSnapshot(

@@ -52,7 +52,7 @@ const postSchema = z.object({
   id: z.string().regex(/^[0-9]{1,24}$/),
   url: z.url().optional(),
   text: z.string().max(100_000),
-  occurredAt: z.iso.datetime(),
+  occurredAt: z.iso.datetime({ offset: true }),
   author: z.object({
     xUserID: z.string().optional(),
     handle: z.string().regex(/^[A-Za-z0-9_]{1,15}$/),
@@ -86,7 +86,7 @@ const snapshotSchema = z.object({
   matchingPolicyRevision: z
     .string()
     .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/),
-  observedAt: z.iso.datetime(),
+  observedAt: z.iso.datetime({ offset: true }),
   events: z.array(eventSchema).max(20_000),
 });
 
