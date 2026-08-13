@@ -711,50 +711,80 @@ test("snapshot R2 reads retry when the D1 head changes mid-read", async () => {
   );
 });
 
-test("legacy seed retirement is guarded and preserves realtime and shared posts", () => {
-  const cleanup = readFileSync(
+test("legacy seed retirement is production-pinned, atomic, and idempotent", () => {
+  const productionCleanup = readFileSync(
     "tools/retire-c108-legacy-realtime-seed.sql",
     "utf8",
   );
+  assert.doesNotMatch(productionCleanup, /^\s*PRAGMA\s+foreign_keys/im);
+  assert.doesNotMatch(
+    productionCleanup,
+    /^\s*CREATE\s+TEMP(?:ORARY)?\s+TABLE/im,
+  );
+  for (const authority of [
+    "b51beff176fae5b9868382d1fa77f53dd94bb46d19ee576833a243d5b9f75e4c",
+    "8ba60301ce35f1c9c3ba49033235175ababf92655724e1f5a55fb5120e20ba56",
+    "67cfc72931c7d77c2d72bc0cca6d8c7d765e6a2607e81c7efe3a36b6ca3f3341",
+    "version.update_count = 5402",
+    "version.byte_count = 8299125",
+    "head.publication_cursor = 3406",
+    "3406 /* legacy-event-count */",
+    "9161 /* legacy-target-count */",
+    "7071 /* legacy-head-count */",
+    "3249 /* orphan-post-count */",
+    "4566 /* orphan-media-count */",
+  ]) {
+    assert.ok(productionCleanup.includes(authority), authority);
+  }
+  assert.match(productionCleanup, /state_kind NOT IN \('shinagaki', 'cover'\)/);
+  assert.match(productionCleanup, /target\.comiket_no <> 108/);
+  assert.match(productionCleanup, /notification_deliveries AS delivery/);
+
+  const cleanup = cleanupForFixture(productionCleanup);
   const guarded = setup();
   seedCatalog(guarded);
-  seedLegacyUpdates(guarded);
-  assert.throws(() => guarded.native.exec(cleanup));
+  seedLegacyCleanupFixture(guarded);
+  assert.throws(() => executeAtomically(guarded, cleanup));
   assert.equal(
     guarded.native
       .prepare("SELECT count(*) AS n FROM circle_update_events")
       .get()?.n,
-    2,
+    3,
   );
+  assert.equal(
+    guarded.native
+      .prepare("SELECT count(*) AS n FROM circle_update_targets")
+      .get()?.n,
+    3,
+  );
+  assert.deepEqual(cleanupStagingTables(guarded), []);
 
   const database = setup();
   seedCatalog(database);
-  seedLegacyUpdates(database);
-  const revision = "f".repeat(64);
-  database.native.exec(`
-    INSERT INTO crawler_snapshot_versions (
-      event_number, revision, schema_version, generation,
-      catalog_payload_sha256, matching_policy_revision, observed_at,
-      update_count, object_key, object_sha256, byte_count,
-      publication_cursor, published_at
-    ) VALUES (
-      108, '${revision}', 1, 1, '${catalogDigest}', 'test-v1', 1,
-      0, 'object', '${"a".repeat(64)}', 1, 2, 1
-    );
-    INSERT INTO crawler_snapshot_heads (
-      event_number, revision, generation, publication_cursor,
-      publication_idempotency_key, updated_at
-    ) VALUES (108, '${revision}', 1, 2, 'snapshot:retirement:fixture', 1);
-    INSERT INTO seed_imports (
-      seed_key, payload_sha256, imported_at, circle_count, post_count, update_count
-    ) VALUES ('c108:old', '${"b".repeat(64)}', 1, 1, 1, 1);
-  `);
-  database.native.exec(cleanup);
+  seedLegacyCleanupFixture(database);
+  seedProductionCleanupAuthority(database);
+  executeAtomically(database, cleanup);
   assert.deepEqual(
     database.rows(
       "SELECT event_key, source FROM circle_update_events ORDER BY event_key",
     ),
     [{ event_key: "state:attendance", source: "cominavi-collector" }],
+  );
+  assert.equal(
+    database.native
+      .prepare("SELECT count(*) AS n FROM circle_update_targets")
+      .get()?.n,
+    1,
+  );
+  assert.deepEqual(
+    database.rows(
+      "SELECT state_kind, update_event_id FROM circle_state_heads ORDER BY state_kind",
+    ),
+    [{ state_kind: "attendance", update_event_id: 2 }],
+  );
+  assert.deepEqual(
+    database.rows("SELECT source FROM ingest_batches ORDER BY source"),
+    [{ source: "cominavi-collector" }],
   );
   assert.equal(
     database.native.prepare("SELECT count(*) AS n FROM seed_imports").get()?.n,
@@ -768,6 +798,76 @@ test("legacy seed retirement is guarded and preserves realtime and shared posts"
       .get()?.n,
     1,
   );
+  assert.equal(
+    database.native
+      .prepare(
+        "SELECT count(*) AS n FROM post_media WHERE post_id = 'shared-post'",
+      )
+      .get()?.n,
+    1,
+  );
+  assert.equal(
+    database.native
+      .prepare(
+        "SELECT count(*) AS n FROM social_posts WHERE post_id = 'seed-only-post'",
+      )
+      .get()?.n,
+    0,
+  );
+  assert.equal(
+    database.native
+      .prepare(
+        "SELECT count(*) AS n FROM post_media WHERE post_id = 'seed-only-post'",
+      )
+      .get()?.n,
+    0,
+  );
+  assert.equal(
+    database.native
+      .prepare(
+        "SELECT count(*) AS n FROM social_posts WHERE post_id = 'unrelated-post'",
+      )
+      .get()?.n,
+    1,
+  );
+  assert.equal(
+    database.native
+      .prepare(
+        "SELECT count(*) AS n FROM crawler_snapshot_publication_receipts",
+      )
+      .get()?.n,
+    1,
+  );
+  assert.deepEqual(cleanupStagingTables(database), []);
+
+  executeAtomically(database, cleanup);
+  assert.deepEqual(
+    database.rows(
+      "SELECT event_key, source FROM circle_update_events ORDER BY event_key",
+    ),
+    [{ event_key: "state:attendance", source: "cominavi-collector" }],
+  );
+  assert.deepEqual(cleanupStagingTables(database), []);
+
+  const unexpectedState = setup();
+  seedCatalog(unexpectedState);
+  seedLegacyCleanupFixture(unexpectedState);
+  seedProductionCleanupAuthority(unexpectedState);
+  unexpectedState.native.exec(`
+    UPDATE circle_update_events
+    SET state_kind = 'inventory', update_kind = 'inventory_sold_out'
+    WHERE event_key = 'seed:stale:artwork'
+  `);
+  assert.throws(() => executeAtomically(unexpectedState, cleanup));
+  assert.equal(
+    unexpectedState.native
+      .prepare(
+        "SELECT count(*) AS n FROM circle_update_events WHERE source = 'seed:c108-local'",
+      )
+      .get()?.n,
+    2,
+  );
+  assert.deepEqual(cleanupStagingTables(unexpectedState), []);
 });
 
 test("OpenAPI documents dedicated snapshot authority and convergence fields", async () => {
@@ -1052,6 +1152,117 @@ function seedLegacyUpdates(database: SQLiteD1Database): void {
       1, 'state:attendance', 2, 1
     );
   `);
+}
+
+function seedLegacyCleanupFixture(database: SQLiteD1Database): void {
+  database.native.exec(`
+    INSERT INTO ingest_batches (
+      id, source, idempotency_key, payload_sha256, schema_version,
+      observed_at, received_at, raw_payload_json
+    ) VALUES
+      (1, 'seed:c108-local', 'seed:legacy:batch', '${"1".repeat(64)}', 1, 1, 1, '{}'),
+      (2, 'cominavi-collector', 'realtime:state:batch', '${"2".repeat(64)}', 1, 1, 1, '{}');
+    INSERT INTO social_posts (
+      post_id, author_handle, text, occurred_at, latest_observed_at, raw_post_json
+    ) VALUES
+      ('shared-post', 'circle101', 'shared', 1786762800, 1786762800, '{}'),
+      ('seed-only-post', 'circle101', 'legacy only', 1786762800, 1786762800, '{}'),
+      ('unrelated-post', 'circle101', 'unrelated', 1786762800, 1786762800, '{}');
+    INSERT INTO post_media (
+      post_id, media_index, media_key, media_type, role, url
+    ) VALUES
+      ('shared-post', 0, 'shared-media', 'photo', 'shinagaki', 'https://example.com/shared.jpg'),
+      ('seed-only-post', 0, 'seed-only-media', 'photo', 'cover', 'https://example.com/seed.jpg'),
+      ('unrelated-post', 0, 'unrelated-media', 'photo', 'post_image', 'https://example.com/unrelated.jpg');
+    INSERT INTO circle_update_events (
+      id, event_key, ingest_batch_id, source, source_revision, post_id,
+      update_kind, state_kind, state_value, confidence, occurred_at,
+      notifiable, evidence_json, created_at
+    ) VALUES
+      (1, 'seed:stale:artwork', 1, 'seed:c108-local', 1, 'shared-post',
+       'shinagaki_published', 'shinagaki', 'shared-post', 'high', 1786762800, 0, '{}', 1),
+      (2, 'state:attendance', 2, 'cominavi-collector', 1, 'shared-post',
+       'attendance_attending', 'attendance', 'attending', 'high', 1786762860, 1, '{}', 1),
+      (3, 'seed:stale:cover', 1, 'seed:c108-local', 1, 'seed-only-post',
+       'cover_published', 'cover', 'seed-only-post', 'high', 1786762800, 0, '{}', 1);
+    INSERT INTO circle_update_targets (update_event_id, comiket_no, wc_id)
+    VALUES (1, 108, 101), (2, 108, 101), (3, 108, 101);
+    INSERT INTO circle_state_heads (
+      comiket_no, wc_id, state_kind, state_value, occurred_at,
+      source_revision, event_key, update_event_id, updated_at
+    ) VALUES
+      (108, 101, 'shinagaki', 'shared-post', 1786762800,
+       1, 'seed:stale:artwork', 1, 1),
+      (108, 101, 'attendance', 'attending', 1786762860,
+       1, 'state:attendance', 2, 1),
+      (108, 101, 'cover', 'seed-only-post', 1786762800,
+       1, 'seed:stale:cover', 3, 1);
+    INSERT INTO seed_imports (
+      seed_key, payload_sha256, imported_at, circle_count, post_count, update_count
+    ) VALUES ('c108:old', '${"b".repeat(64)}', 1, 1, 2, 2);
+  `);
+}
+
+function seedProductionCleanupAuthority(database: SQLiteD1Database): void {
+  const revision =
+    "b51beff176fae5b9868382d1fa77f53dd94bb46d19ee576833a243d5b9f75e4c";
+  database.native.exec(`
+    INSERT INTO crawler_snapshot_versions (
+      event_number, revision, schema_version, generation,
+      catalog_payload_sha256, matching_policy_revision, observed_at,
+      update_count, object_key, object_sha256, byte_count,
+      publication_cursor, published_at
+    ) VALUES (
+      108, '${revision}', 1, 1,
+      '8ba60301ce35f1c9c3ba49033235175ababf92655724e1f5a55fb5120e20ba56',
+      'test-v1', 1, 5402, 'object',
+      '67cfc72931c7d77c2d72bc0cca6d8c7d765e6a2607e81c7efe3a36b6ca3f3341',
+      8299125, 3406, 1
+    );
+    INSERT INTO crawler_snapshot_heads (
+      event_number, revision, generation, publication_cursor,
+      publication_idempotency_key, updated_at
+    ) VALUES (108, '${revision}', 1, 3406, 'snapshot:retirement:fixture', 1);
+    INSERT INTO crawler_snapshot_publication_receipts (
+      idempotency_key, payload_sha256, event_number, base_revision,
+      revision, generation, result_json, created_at
+    ) VALUES (
+      'snapshot:retirement:fixture', '${"c".repeat(64)}', 108, 'none',
+      '${revision}', 1, '{}', 1
+    );
+  `);
+}
+
+function cleanupForFixture(productionCleanup: string): string {
+  return productionCleanup
+    .replace("3406 /* legacy-event-count */", "2 /* legacy-event-count */")
+    .replace(
+      "3406 /* legacy-c108-event-count */",
+      "2 /* legacy-c108-event-count */",
+    )
+    .replace("9161 /* legacy-target-count */", "2 /* legacy-target-count */")
+    .replace("7071 /* legacy-head-count */", "2 /* legacy-head-count */")
+    .replace("3249 /* orphan-post-count */", "1 /* orphan-post-count */")
+    .replace("4566 /* orphan-media-count */", "1 /* orphan-media-count */");
+}
+
+function executeAtomically(database: SQLiteD1Database, sql: string): void {
+  database.native.exec("BEGIN");
+  try {
+    database.native.exec(sql);
+    database.native.exec("COMMIT");
+  } catch (error) {
+    database.native.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function cleanupStagingTables(
+  database: SQLiteD1Database,
+): Array<Record<string, unknown>> {
+  return database.rows(
+    "SELECT name FROM sqlite_schema WHERE name LIKE 'cominavi_cleanup_%'",
+  );
 }
 
 function seedConcurrentInventory(database: SQLiteD1Database): void {
