@@ -151,7 +151,13 @@ async function authenticatedCrawlerRequest(
   context: APIContext,
 ): Promise<AuthenticatedCrawlerRequest> {
   if (context.authenticatedCrawlerRequest) {
-    return context.authenticatedCrawlerRequest;
+    if ("batch" in context.authenticatedCrawlerRequest) {
+      return context.authenticatedCrawlerRequest;
+    }
+    return {
+      ...context.authenticatedCrawlerRequest,
+      batch: parseCrawlerBatch(context.authenticatedCrawlerRequest.rawBody),
+    };
   }
   const authenticated = await authenticateCrawlerRequest(
     context.request.clone() as unknown as Request,

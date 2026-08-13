@@ -11,7 +11,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-// This schema mirrors the final D1 shape after migrations 0001-0007.
+// This schema mirrors the final D1 shape after migrations 0001-0008.
 // The checked-in SQL migrations remain deployment authority; this module
 // provides the typed query surface for Worker services.
 
@@ -368,6 +368,200 @@ export const catalogVersions = sqliteTable(
     check("catalog_versions_check_15", sql.raw("circle_count >= 0")),
     check("catalog_versions_check_16", sql.raw("layout_count >= 0")),
     check("catalog_versions_check_17", sql.raw("image_count >= 0")),
+  ],
+);
+
+export const circleTagOverlayObjectCleanup = sqliteTable(
+  "circle_tag_overlay_object_cleanup",
+  {
+    objectKey: text("object_key").primaryKey(),
+    eventNumber: integer("event_number").notNull(),
+    revision: text("revision").notNull(),
+    objectSHA256: text("object_sha256").notNull(),
+    state: text("state", { enum: ["queued", "leased"] as const })
+      .notNull()
+      .default(sql.raw("'queued'")),
+    attemptCount: integer("attempt_count").notNull().default(sql.raw("0")),
+    leaseID: text("lease_id"),
+    leaseExpiresAt: integer("lease_expires_at"),
+    availableAt: integer("available_at").notNull(),
+    lastError: text("last_error"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    index("circle_tag_overlay_object_cleanup_ready").on(
+      table.state,
+      table.availableAt,
+      table.createdAt,
+    ),
+    check(
+      "circle_tag_overlay_object_cleanup_check_1",
+      sql.raw("state IN ('queued', 'leased')"),
+    ),
+    check(
+      "circle_tag_overlay_object_cleanup_check_2",
+      sql.raw("event_number > 0 AND event_number <= 10000"),
+    ),
+    check(
+      "circle_tag_overlay_object_cleanup_check_3",
+      sql.raw("length(revision) = 64 AND revision NOT GLOB '*[^0-9a-f]*'"),
+    ),
+    check(
+      "circle_tag_overlay_object_cleanup_check_4",
+      sql.raw(
+        "length(object_sha256) = 64 AND object_sha256 NOT GLOB '*[^0-9a-f]*'",
+      ),
+    ),
+  ],
+);
+
+export const circleTagOverlayVersions = sqliteTable(
+  "circle_tag_overlay_versions",
+  {
+    eventNumber: integer("event_number").notNull(),
+    revision: text("revision").notNull(),
+    schemaVersion: integer("schema_version").notNull(),
+    catalogVersionID: text("catalog_version_id").notNull(),
+    catalogPayloadSHA256: text("catalog_payload_sha256").notNull(),
+    taxonomyRevision: text("taxonomy_revision").notNull(),
+    matchingPolicyRevision: text("matching_policy_revision").notNull(),
+    evaluatedCircleCount: integer("evaluated_circle_count").notNull(),
+    taggedCircleCount: integer("tagged_circle_count").notNull(),
+    termCount: integer("term_count").notNull(),
+    objectKey: text("object_key").notNull(),
+    objectSHA256: text("object_sha256").notNull(),
+    byteCount: integer("byte_count").notNull(),
+    publishedAt: integer("published_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.eventNumber, table.revision] }),
+    foreignKey({
+      columns: [table.catalogVersionID],
+      foreignColumns: [catalogVersions.id],
+    }),
+    unique().on(table.objectKey),
+    check(
+      "circle_tag_overlay_versions_check_1",
+      sql.raw("event_number > 0 AND event_number <= 10000"),
+    ),
+    check("circle_tag_overlay_versions_check_2", sql.raw("schema_version = 1")),
+    check(
+      "circle_tag_overlay_versions_check_3",
+      sql.raw("length(revision) = 64 AND revision NOT GLOB '*[^0-9a-f]*'"),
+    ),
+    check(
+      "circle_tag_overlay_versions_check_4",
+      sql.raw(
+        "length(catalog_payload_sha256) = 64 AND catalog_payload_sha256 NOT GLOB '*[^0-9a-f]*'",
+      ),
+    ),
+    check(
+      "circle_tag_overlay_versions_check_5",
+      sql.raw("length(taxonomy_revision) BETWEEN 1 AND 128"),
+    ),
+    check(
+      "circle_tag_overlay_versions_check_6",
+      sql.raw("length(matching_policy_revision) BETWEEN 1 AND 128"),
+    ),
+    check(
+      "circle_tag_overlay_versions_check_7",
+      sql.raw("evaluated_circle_count >= 0"),
+    ),
+    check(
+      "circle_tag_overlay_versions_check_8",
+      sql.raw(
+        "tagged_circle_count >= 0 AND tagged_circle_count <= evaluated_circle_count",
+      ),
+    ),
+    check("circle_tag_overlay_versions_check_9", sql.raw("term_count >= 0")),
+    check(
+      "circle_tag_overlay_versions_check_10",
+      sql.raw(
+        "length(object_sha256) = 64 AND object_sha256 NOT GLOB '*[^0-9a-f]*'",
+      ),
+    ),
+    check(
+      "circle_tag_overlay_versions_check_11",
+      sql.raw("byte_count > 0 AND byte_count <= 16777216"),
+    ),
+  ],
+);
+
+export const circleTagOverlayHeads = sqliteTable(
+  "circle_tag_overlay_heads",
+  {
+    eventNumber: integer("event_number").primaryKey(),
+    revision: text("revision").notNull(),
+    publicationIdempotencyKey: text("publication_idempotency_key").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.eventNumber, table.revision],
+      foreignColumns: [
+        circleTagOverlayVersions.eventNumber,
+        circleTagOverlayVersions.revision,
+      ],
+    }),
+    check(
+      "circle_tag_overlay_heads_check_1",
+      sql.raw("event_number > 0 AND event_number <= 10000"),
+    ),
+    check(
+      "circle_tag_overlay_heads_check_2",
+      sql.raw("length(revision) = 64 AND revision NOT GLOB '*[^0-9a-f]*'"),
+    ),
+    check(
+      "circle_tag_overlay_heads_check_3",
+      sql.raw("length(publication_idempotency_key) BETWEEN 16 AND 200"),
+    ),
+  ],
+);
+
+export const circleTagOverlayPublicationReceipts = sqliteTable(
+  "circle_tag_overlay_publication_receipts",
+  {
+    idempotencyKey: text("idempotency_key").primaryKey(),
+    payloadSHA256: text("payload_sha256").notNull(),
+    eventNumber: integer("event_number").notNull(),
+    baseRevision: text("base_revision").notNull(),
+    revision: text("revision").notNull(),
+    resultJSON: text("result_json").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.eventNumber, table.revision],
+      foreignColumns: [
+        circleTagOverlayVersions.eventNumber,
+        circleTagOverlayVersions.revision,
+      ],
+    }),
+    check(
+      "circle_tag_overlay_publication_receipts_check_1",
+      sql.raw(
+        "length(payload_sha256) = 64 AND payload_sha256 NOT GLOB '*[^0-9a-f]*'",
+      ),
+    ),
+    check(
+      "circle_tag_overlay_publication_receipts_check_2",
+      sql.raw("event_number > 0 AND event_number <= 10000"),
+    ),
+    check(
+      "circle_tag_overlay_publication_receipts_check_3",
+      sql.raw(
+        "base_revision = 'none' OR (length(base_revision) = 64 AND base_revision NOT GLOB '*[^0-9a-f]*')",
+      ),
+    ),
+    check(
+      "circle_tag_overlay_publication_receipts_check_4",
+      sql.raw("length(revision) = 64 AND revision NOT GLOB '*[^0-9a-f]*'"),
+    ),
+    check(
+      "circle_tag_overlay_publication_receipts_check_5",
+      sql.raw("json_valid(result_json)"),
+    ),
   ],
 );
 
@@ -2421,6 +2615,10 @@ export const migratedTables = {
   catalog_refresh_jobs: catalogRefreshJobs,
   catalog_stable_circles: catalogStableCircles,
   catalog_versions: catalogVersions,
+  circle_tag_overlay_heads: circleTagOverlayHeads,
+  circle_tag_overlay_object_cleanup: circleTagOverlayObjectCleanup,
+  circle_tag_overlay_publication_receipts: circleTagOverlayPublicationReceipts,
+  circle_tag_overlay_versions: circleTagOverlayVersions,
   circle_state_heads: circleStateHeads,
   circle_update_events: circleUpdateEvents,
   circle_update_targets: circleUpdateTargets,

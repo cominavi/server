@@ -12,9 +12,11 @@ import {
   authenticateCrawlerRequest,
   parseCrawlerBatch,
 } from "../lib/server/crawler-ingest";
+import { maximumTagOverlayPublicationBytes } from "../lib/server/tag-overlays";
 import { authenticateCatalogPublisherRequest } from "../lib/server/catalog-publisher-auth";
 import type {
   AuthenticatedCatalogPublisherRequest,
+  AuthenticatedCrawlerRawRequest,
   AuthenticatedCrawlerRequest,
 } from "./core";
 
@@ -52,6 +54,16 @@ export function createHomepageApp(astroFetch: AstroFetch) {
           "outgoingResponse",
         ],
       },
+      integrations: (defaults) => [
+        ...defaults.filter((integration) => integration.name !== "HttpServer"),
+        Sentry.httpServerIntegration({
+          // Sentry v10 captures request bodies independently of the
+          // dataCollection list. Never tee or await the exact-byte signed
+          // internal streams before their bounded authenticators run.
+          ignoreRequestBody: (url) =>
+            new URL(url).pathname.startsWith("/api/v2/internal/"),
+        }),
+      ],
     }),
   );
 
@@ -73,15 +85,40 @@ export function createHomepageApp(astroFetch: AstroFetch) {
   app.post("/api/v2/internal/crawler/events", async (context) => {
     try {
       const authenticated = await authenticateCrawlerRequest(
-        context.req.raw.clone() as unknown as Request,
+        context.req.raw,
         context.env.COMINAVI_CRAWLER_WEBHOOK_SECRET,
       );
-      return handleOpenAPIRequest(context, {
-        authenticatedCrawlerRequest: {
-          ...authenticated,
-          batch: parseCrawlerBatch(authenticated.rawBody),
+      return handleOpenAPIRequest(
+        context,
+        {
+          authenticatedCrawlerRequest: {
+            ...authenticated,
+            batch: parseCrawlerBatch(authenticated.rawBody),
+          },
         },
-      });
+        crawlerJSONTransportRequest(context.req.raw, authenticated.rawBody),
+      );
+    } catch (error) {
+      return apiErrorResponse(error);
+    }
+  });
+
+  app.post("/api/v2/internal/crawler/tag-overlays", async (context) => {
+    try {
+      const authenticatedCrawlerRequest = await authenticateCrawlerRequest(
+        context.req.raw,
+        context.env.COMINAVI_CRAWLER_WEBHOOK_SECRET,
+        Date.now(),
+        maximumTagOverlayPublicationBytes,
+      );
+      return handleOpenAPIRequest(
+        context,
+        { authenticatedCrawlerRequest },
+        crawlerJSONTransportRequest(
+          context.req.raw,
+          authenticatedCrawlerRequest.rawBody,
+        ),
+      );
     } catch (error) {
       return apiErrorResponse(error);
     }
@@ -137,11 +174,15 @@ export function createHomepageApp(astroFetch: AstroFetch) {
 
   app.get("/api/v2/events/:eventNumber/updates", (context) => {
     if (!isCacheableRealtimeUpdatesURL(new URL(context.req.url))) {
+      const mentionsTagRevision = /(?:^\?|&)tagRevision(?:=|&|$)/.test(
+        new URL(context.req.url).search,
+      );
       return context.json(
         {
           error: "invalid_realtime_query",
-          message:
-            "Realtime updates accept only one canonical afterCursor value.",
+          message: mentionsTagRevision
+            ? "Realtime updates accept only canonical afterCursor and tagRevision values."
+            : "Realtime updates accept only one canonical afterCursor value.",
         },
         400,
         {
@@ -172,7 +213,8 @@ export function createHomepageApp(astroFetch: AstroFetch) {
 async function handleOpenAPIRequest(
   context: Context<{ Bindings: Cloudflare.Env }>,
   authenticated?: {
-    authenticatedCrawlerRequest?: AuthenticatedCrawlerRequest;
+    authenticatedCrawlerRequest?:
+      AuthenticatedCrawlerRawRequest | AuthenticatedCrawlerRequest;
     authenticatedCatalogPublisherRequest?: AuthenticatedCatalogPublisherRequest;
   },
   transportRequest: Request = context.req.raw,
@@ -233,6 +275,20 @@ function catalogJSONTransportRequest(request: Request): Request {
   });
 }
 
+function crawlerJSONTransportRequest(
+  request: Request,
+  rawBody: Uint8Array,
+): Request {
+  const headers = new Headers(request.headers);
+  headers.set("Content-Type", "application/json");
+  headers.delete("Content-Length");
+  return new Request(request.url, {
+    method: request.method,
+    headers,
+    body: Uint8Array.from(rawBody).buffer,
+  });
+}
+
 async function withCanonicalJSONHeaders(
   response: Response,
   request: Request,
@@ -251,12 +307,27 @@ async function withCanonicalJSONHeaders(
     isCacheableRealtimeUpdatesURL(url)
   ) {
     const body = await response.arrayBuffer();
-    const etag = await responseETag(body);
     headers.set("Access-Control-Allow-Origin", "*");
     headers.set(
       "Access-Control-Expose-Headers",
       "Cache-Control, CDN-Cache-Control, ETag",
     );
+    const tagOverlayIsTransientOrUncacheable =
+      url.searchParams.has("tagRevision") &&
+      new TextDecoder()
+        .decode(body)
+        .match(/"tagOverlayStatus":"(?:invalidated|unavailable)"/) !== null;
+    if (tagOverlayIsTransientOrUncacheable) {
+      headers.set("Cache-Control", "private, no-store");
+      headers.set("CDN-Cache-Control", "no-store");
+      headers.set("Cloudflare-CDN-Cache-Control", "no-store");
+      return new Response(body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+    }
+    const etag = await responseETag(body);
     headers.set("Cache-Control", realtimeUpdatesBrowserCacheControl);
     headers.set("CDN-Cache-Control", realtimeUpdatesCDNCacheControl);
     headers.set("Cloudflare-CDN-Cache-Control", realtimeUpdatesCDNCacheControl);
@@ -288,11 +359,13 @@ async function withCanonicalJSONHeaders(
 
 function isCacheableRealtimeUpdatesURL(url: URL): boolean {
   if (url.search.length === 0) return true;
-  const entries = Array.from(url.searchParams.entries());
-  if (entries.length !== 1 || entries[0]?.[0] !== "afterCursor") return false;
-  const value = entries[0][1];
-  if (!/^(?:0|[1-9]\d*)$/.test(value)) return false;
-  const cursor = Number(value);
+  const match =
+    /^\?(?:(?:afterCursor=(0|[1-9]\d*)(?:&tagRevision=(none|[0-9a-f]{64}))?)|(?:tagRevision=(none|[0-9a-f]{64})))$/.exec(
+      url.search,
+    );
+  if (!match) return false;
+  if (match[1] === undefined) return true;
+  const cursor = Number(match[1]);
   return Number.isSafeInteger(cursor) && cursor >= 0;
 }
 

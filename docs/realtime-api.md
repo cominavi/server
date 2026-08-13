@@ -57,15 +57,49 @@ event contains the source post, all retained media (including shinagaki and
 covers), and every WCID target, so A+B and one-account-many mappings remain
 explicit.
 
+Circle tags are a separate full-replacement overlay, not a realtime
+`stateKind`. A client that wants tags adds `tagRevision=none` on its first
+request, then sends the last accepted 64-character lowercase revision. The
+response includes `tagOverlayStatus` whenever `tagRevision` is supplied. The
+status is `current`, `absent`, `invalidated`, or `unavailable`; the optional
+top-level `tagOverlay` accompanies `current` only when the active revision
+differs from the supplied value. `afterCursor` may be combined only in
+canonical order, for example
+`?afterCursor=0&tagRevision=<revision>`. Existing requests that omit
+`tagRevision` retain the original response shape exactly.
+
+The compact overlay is keyed by stable WCID and contains a sorted term table
+plus sorted circle assignments. Term kinds are `work`, `character`, `content`,
+`theme`, `format`, and `activity`; labels are returned exactly as curated,
+including classifications such as `R-18`, `BL`, and `百合`. The revision is
+the SHA-256 of compact JSON with this fixed semantic key order, excluding only
+`revision` itself:
+
+```text
+schemaVersion, catalogPayloadSHA256, taxonomyRevision,
+matchingPolicyRevision, evaluatedCircleCount, taggedCircleCount, terms, circles
+```
+
+Terms, circles, and each circle's tag IDs must already be unique and in
+canonical ascending order. Every tag ID must resolve to a published term, every
+term must be used, `taggedCircleCount` must equal the circle array length, and
+`evaluatedCircleCount` must equal the active catalog circle count, and every
+assigned WCID must exist in that catalog version. `invalidated` tells the
+client to clear an incompatible cache; `unavailable` lets it retain a
+source-digest-compatible cache and retry later. Overlay storage failure never
+prevents realtime updates or cursor advancement, and both transient statuses
+are private/no-store.
+
 The stable full URL and canonical `afterCursor` page URLs are shared at
 Cloudflare's edge. Browsers may reuse a response for 60 seconds; Cloudflare
 serves stale data while one request revalidates in the background and may
 retain the last good response during a short origin outage. Every response
-emits a content-derived ETag and honors `If-None-Match`. Unknown, duplicated,
-negative, or non-canonical cursor queries are rejected without caching so they
-cannot poison the shared cache. The fixed page boundary lets fresh installs
-converge on the same edge-cache keys instead of inventing client-selected page
-sizes.
+emits a content-derived ETag and honors `If-None-Match`. Unknown tag revisions
+return `invalidated` without reading R2 or entering the shared cache.
+Duplicated, negative, misordered, or non-canonical cursor/tag revision queries
+are rejected without caching so they cannot poison the shared cache. The fixed
+page boundary lets fresh installs converge on the same edge-cache keys instead
+of inventing client-selected page sizes.
 
 State heads are a projection, not the audit log. They advance by source post
 time, source revision, then event key. Late or duplicate webhooks therefore
@@ -98,6 +132,32 @@ network or process failure. D1 stores the immutable batch/event first, advances
 each circle/state head only when the observation is newer, and creates at most
 one delivery per event/user/device. An A+B update consequently produces one
 notification, not two.
+
+### Circle tag overlay publication
+
+`POST /api/v2/internal/crawler/tag-overlays` uses the same three crawler HMAC
+headers and exact-byte signature convention. Its body is bounded to 16 MiB and
+contains `eventNumber`, a `baseRevision` (`none` or 64 lowercase hex), and the
+complete schema-version-1 overlay. The publisher must calculate the overlay
+revision from the canonical semantic representation above.
+
+Before publication, the Worker verifies structure, canonical ordering,
+referential integrity, counts, and the content-derived revision. It also
+requires `catalogPayloadSHA256` to equal the active event catalog version's raw
+main-database SHA-256, verifies the full active circle count/WCID authority, and
+records the exact version ID as publication provenance. Applicability remains
+bound to the raw main SHA so an image-only catalog rotation does not invalidate
+unchanged tags. It records a durable cleanup intent before writing normalized
+immutable JSON to `COMINAVI_CATALOGS`, then atomically advances the D1 head and
+publication receipt while consuming that intent. The scheduled worker removes
+unreferenced objects left by a crash or lost CAS. `baseRevision` is a compare-and-swap fence:
+a stale value conflicts rather than rolling back a newer overlay. Exact
+idempotency-key/body replays recover the original receipt and repair a missing
+immutable object from those exact signed bytes; corrupted objects fail closed.
+Reusing a key for other bytes conflicts.
+
+Tag overlay activation does not create notifications, append realtime events,
+or modify realtime state heads.
 
 ## APNs delivery
 

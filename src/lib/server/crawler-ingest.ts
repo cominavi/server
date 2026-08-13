@@ -18,7 +18,7 @@ import {
 import { ServiceError } from "./service-error";
 
 const encoder = new TextEncoder();
-const maximumBodyBytes = 1_000_000;
+const defaultMaximumBodyBytes = 1_000_000;
 const maximumEvents = 50;
 // D1 executes every statement in a batch transactionally, but each statement
 // still counts as database work. Keep authenticated callbacks bounded even if
@@ -108,6 +108,7 @@ export async function authenticateCrawlerRequest(
   request: Request,
   secret: string,
   nowMilliseconds = Date.now(),
+  maximumBodyBytes = defaultMaximumBodyBytes,
 ): Promise<{
   idempotencyKey: string;
   rawBody: Uint8Array;
@@ -134,15 +135,7 @@ export async function authenticateCrawlerRequest(
     throw invalidCrawlerSignature();
   }
 
-  const bodyBuffer = await request.arrayBuffer();
-  if (bodyBuffer.byteLength === 0 || bodyBuffer.byteLength > maximumBodyBytes) {
-    throw new ServiceError(
-      "invalid_crawler_payload",
-      413,
-      "The crawler payload is empty or too large.",
-    );
-  }
-  const rawBody = new Uint8Array(bodyBuffer);
+  const rawBody = await readBoundedCrawlerBody(request, maximumBodyBytes);
   const signedPrefix = encoder.encode(`${timestampText}.${idempotencyKey}.`);
   const signed = new Uint8Array(signedPrefix.length + rawBody.length);
   signed.set(signedPrefix);
@@ -165,6 +158,55 @@ export async function authenticateCrawlerRequest(
     rawBody,
     payloadSHA256: await sha256Hex(rawBody),
   };
+}
+
+async function readBoundedCrawlerBody(
+  request: Request,
+  maximumBodyBytes: number,
+): Promise<Uint8Array> {
+  const contentLength = request.headers.get("Content-Length");
+  if (
+    contentLength !== null &&
+    /^[0-9]+$/.test(contentLength) &&
+    BigInt(contentLength) > BigInt(maximumBodyBytes)
+  ) {
+    throw invalidCrawlerBodySize();
+  }
+
+  const body = request.body;
+  if (body === null) throw invalidCrawlerBodySize();
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value.byteLength === 0) continue;
+      if (value.byteLength > maximumBodyBytes - byteLength) {
+        // Cancellation is advisory and an upstream/tee branch may never
+        // settle. Reject immediately while still asking the source to stop.
+        void reader.cancel().catch(() => undefined);
+        throw invalidCrawlerBodySize();
+      }
+      chunks.push(value);
+      byteLength += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (byteLength === 0) throw invalidCrawlerBodySize();
+  if (chunks.length === 1) return chunks[0]!;
+
+  const rawBody = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    rawBody.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return rawBody;
 }
 
 export function parseCrawlerBatch(rawBody: Uint8Array): CrawlerBatch {
@@ -804,6 +846,14 @@ function invalidCrawlerSignature(): ServiceError {
     "invalid_crawler_signature",
     401,
     "The crawler signature is invalid or expired.",
+  );
+}
+
+function invalidCrawlerBodySize(): ServiceError {
+  return new ServiceError(
+    "invalid_crawler_payload",
+    413,
+    "The crawler payload is empty or too large.",
   );
 }
 

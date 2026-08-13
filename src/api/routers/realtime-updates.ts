@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { parseEventNumber } from "../../lib/server/favorites";
 import { loadRealtimeUpdates } from "../../lib/server/realtime-api";
+import { loadTagOverlay } from "../../lib/server/tag-overlays";
 import { publicProcedure } from "../core";
+import {
+  circleTagOverlaySchema,
+  tagOverlayRevisionSchema,
+} from "../tag-overlay-schema";
 
 const eventNumberSchema = z.coerce.number().int().positive().max(10_000);
 const realtimeCursorSchema = z.coerce
@@ -72,6 +77,10 @@ const realtimeSnapshotSchema = z.object({
   eventNumber: z.number().int().positive().max(10_000),
   hasMore: z.boolean(),
   updates: z.array(realtimeUpdateSchema),
+  tagOverlayStatus: z
+    .enum(["current", "absent", "invalidated", "unavailable"])
+    .optional(),
+  tagOverlay: circleTagOverlaySchema.optional(),
 });
 
 interface RawRealtimeMedia {
@@ -130,14 +139,17 @@ export const listRealtimeUpdates = publicProcedure
     operationId: "listRealtimeUpdates",
     summary: "Get realtime event updates",
     description:
-      "Returns immutable realtime circle updates in ascending cursor order. The query-free representation remains a complete snapshot for older clients; afterCursor returns a cacheable page of newer updates.",
+      "Returns immutable realtime circle updates in ascending cursor order. The query-free representation remains a complete snapshot for older clients; afterCursor returns a cacheable page of newer updates. Supplying tagRevision returns an independent tagOverlayStatus and the active full tag overlay only when needed and available.",
     tags: ["Realtime"],
     inputStructure: "detailed",
   })
   .input(
     z.object({
       params: z.object({ eventNumber: eventNumberSchema }),
-      query: z.object({ afterCursor: realtimeCursorSchema.optional() }),
+      query: z.object({
+        afterCursor: realtimeCursorSchema.optional(),
+        tagRevision: tagOverlayRevisionSchema.optional(),
+      }),
     }),
   )
   .output(realtimeSnapshotSchema)
@@ -148,9 +160,24 @@ export const listRealtimeUpdates = publicProcedure
       eventNumber,
       input.query.afterCursor,
     );
+    const tagOverlayResult =
+      input.query.tagRevision === undefined
+        ? undefined
+        : await loadTagOverlay(
+            context.env.COMINAVI_DB,
+            context.env.COMINAVI_CATALOGS,
+            eventNumber,
+            input.query.tagRevision,
+          );
     return {
       ...result,
       updates: (result.updates as RawRealtimeUpdate[]).map(normalizeUpdate),
+      ...(tagOverlayResult === undefined
+        ? {}
+        : { tagOverlayStatus: tagOverlayResult.status }),
+      ...(tagOverlayResult?.overlay === undefined
+        ? {}
+        : { tagOverlay: tagOverlayResult.overlay }),
     };
   });
 

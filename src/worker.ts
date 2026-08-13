@@ -11,6 +11,7 @@ import { processAccountDeletionJobs } from "./lib/server/account-deletion";
 import { processAppleRevocations } from "./lib/server/apple-auth-flow";
 import { processFollowingSnapshotCleanup } from "./lib/server/following-import";
 import { processExpiredCirclemsOAuth } from "./lib/server/circlems-oauth-flow";
+import { processPendingCircleTagOverlayCleanup } from "./lib/server/tag-overlay-cleanup";
 import { createHomepageApp } from "./api/app";
 export { PlanSyncObject } from "./lib/server/plan-sync-object";
 
@@ -50,6 +51,10 @@ export default {
           env.COMINAVI_FOLLOWING_SNAPSHOTS,
         ),
         processExpiredCirclemsOAuth(env.COMINAVI_DB),
+        processPendingCircleTagOverlayCleanup(
+          env.COMINAVI_DB,
+          env.COMINAVI_CATALOGS,
+        ),
         processAccountDeletionJobs(
           env.COMINAVI_DB,
           env.COMINAVI_PLAN_SYNC,

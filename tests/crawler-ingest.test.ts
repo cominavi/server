@@ -126,3 +126,101 @@ test("crawler HMAC covers timestamp, idempotency key, and exact body", async () 
     authenticateCrawlerRequest(tampered, secret, timestamp * 1_000),
   );
 });
+
+test("crawler authentication cancels an oversized chunked body without Content-Length", async () => {
+  let cancelled = false;
+  const request = crawlerRequest(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(Uint8Array.of(1, 2, 3));
+        controller.enqueue(Uint8Array.of(4, 5, 6));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    }),
+  );
+
+  await assert.rejects(
+    () => authenticateCrawlerRequest(request, secret, timestamp * 1_000, 5),
+    (error: unknown) => hasServiceError(error, "invalid_crawler_payload", 413),
+  );
+  assert.equal(cancelled, true);
+});
+
+test("crawler authentication rejects an excessive declared length before reading the stream", async () => {
+  let bodyAccessed = false;
+  const request = {
+    headers: crawlerHeaders({ "Content-Length": "6" }),
+    get body() {
+      bodyAccessed = true;
+      throw new Error("the oversized declared body must not be consumed");
+    },
+  } as unknown as Request;
+
+  await assert.rejects(
+    () => authenticateCrawlerRequest(request, secret, timestamp * 1_000, 5),
+    (error: unknown) => hasServiceError(error, "invalid_crawler_payload", 413),
+  );
+  assert.equal(bodyAccessed, false);
+});
+
+test("crawler authentication accepts an exact-bound streamed body and preserves its bytes", async () => {
+  const rawBody = Uint8Array.of(0, 1, 2, 127, 128, 255);
+  const signature = createHmac("sha256", secret)
+    .update(`${timestamp}.${idempotencyKey}.`)
+    .update(rawBody)
+    .digest("hex");
+  const request = crawlerRequest(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(rawBody.slice(0, 2));
+        controller.enqueue(rawBody.slice(2));
+        controller.close();
+      },
+    }),
+    { "X-ComiNavi-Signature": `v1=${signature}` },
+  );
+
+  const authenticated = await authenticateCrawlerRequest(
+    request,
+    secret,
+    timestamp * 1_000,
+    rawBody.byteLength,
+  );
+  assert.deepEqual(authenticated.rawBody, rawBody);
+});
+
+function crawlerRequest(
+  body: ReadableStream<Uint8Array>,
+  headers: Record<string, string> = {},
+): Request {
+  return {
+    headers: crawlerHeaders(headers),
+    body,
+  } as unknown as Request;
+}
+
+function crawlerHeaders(headers: Record<string, string> = {}): Headers {
+  return new Headers({
+    "Idempotency-Key": idempotencyKey,
+    "X-ComiNavi-Timestamp": String(timestamp),
+    "X-ComiNavi-Signature": `v1=${"0".repeat(64)}`,
+    ...headers,
+  });
+}
+
+function hasServiceError(
+  error: unknown,
+  code: string,
+  status: number,
+): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === code &&
+    "status" in error &&
+    error.status === status
+  );
+}

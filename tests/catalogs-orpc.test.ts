@@ -106,13 +106,19 @@ test("catalog oRPC routes list manifests and preserve resumable artifact behavio
   }>();
   assert.equal(indexBody.items.length, 1);
   assert.equal("sourceUpdatedAt" in indexBody.items[0]!, false);
+  assert.equal(indexBody.items[0]?.sourceMainSHA256, "c".repeat(64));
 
   const manifest = await fetchCatalog("/api/v2/catalogs/108");
   assert.equal(manifest.status, 200);
+  const manifestBody = await manifest.json<{
+    sourceMainSHA256: string;
+    artifact: { url: string };
+  }>();
   assert.equal(
-    (await manifest.json<{ artifact: { url: string } }>()).artifact.url,
+    manifestBody.artifact.url,
     `/api/v2/catalogs/108/versions/${versionID}/artifact`,
   );
+  assert.equal(manifestBody.sourceMainSHA256, "c".repeat(64));
 
   const path = `/api/v2/catalogs/108/versions/${versionID}/artifact`;
   const full = await fetchCatalog(path);

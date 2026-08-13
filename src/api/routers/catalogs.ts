@@ -24,6 +24,7 @@ const catalogManifestSchema = z.object({
   name: z.string().min(1),
   publishedAt: z.number().int().nonnegative(),
   sourceUpdatedAt: z.number().int().nonnegative().optional(),
+  sourceMainSHA256: sha256Schema,
   artifact: z.object({
     url: z
       .string()
@@ -313,6 +314,7 @@ function generatedCatalogManifest(
     ...(catalog.sourceUpdatedAt === null
       ? {}
       : { sourceUpdatedAt: catalog.sourceUpdatedAt }),
+    sourceMainSHA256: catalog.sourceMainSHA256,
     artifact: {
       ...catalog.artifact,
       url: catalogArtifactPath(catalog.comiketNo, catalog.versionID),

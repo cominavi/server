@@ -9,6 +9,7 @@ import { invitationRouter, plansRouter } from "./routers/plans-control";
 import { profileRouter } from "./routers/profile";
 import { pushDeviceRouter } from "./routers/push-devices";
 import { realtimeUpdatesRouter } from "./routers/realtime-updates";
+import { tagOverlayRouter } from "./routers/tag-overlays";
 
 export const apiRouter = {
   auth: authRouter,
@@ -19,7 +20,7 @@ export const apiRouter = {
   },
   internal: {
     catalog: catalogControlRouter,
-    crawler: crawlerIngressRouter,
+    crawler: { ...crawlerIngressRouter, tagOverlays: tagOverlayRouter },
   },
   me: {
     profile: profileRouter,

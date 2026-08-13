@@ -41,6 +41,7 @@ export interface CatalogIndexItemV1 {
   name: string;
   publishedAt: number;
   sourceUpdatedAt: number | null;
+  sourceMainSHA256: string;
   artifact: {
     url: string;
     sha256: string;
@@ -64,6 +65,7 @@ interface CatalogRow {
   comiket_no: number;
   name: string;
   source_updated_at: number | null;
+  source_main_sha256: string;
   derived_sha256: string;
   derived_bytes: number;
   circle_count: number;
@@ -77,6 +79,7 @@ const catalogRowSelection = {
   comiket_no: catalogVersions.comiketNo,
   name: catalogEvents.name,
   source_updated_at: catalogVersions.sourceUpdatedAt,
+  source_main_sha256: catalogVersions.sourceMainSHA256,
   derived_sha256: sql<string>`${catalogVersions.derivedSHA256}`,
   derived_bytes: sql<number>`${catalogVersions.derivedBytes}`,
   circle_count: catalogVersions.circleCount,
@@ -1348,6 +1351,7 @@ function publicCatalog(row: CatalogRow): CatalogIndexItemV1 {
     name: row.name,
     publishedAt: row.published_at,
     sourceUpdatedAt: row.source_updated_at,
+    sourceMainSHA256: row.source_main_sha256,
     artifact: {
       url: `/api/v2/catalogs/${row.comiket_no}/versions/${encodeURIComponent(row.id)}/artifact`,
       sha256: row.derived_sha256,

@@ -10,10 +10,13 @@ import { FollowingImportError } from "../lib/server/following-import";
 import { ServiceError } from "../lib/server/service-error";
 import type { CrawlerBatch } from "../lib/server/crawler-ingest";
 
-export interface AuthenticatedCrawlerRequest {
+export interface AuthenticatedCrawlerRawRequest {
   idempotencyKey: string;
   rawBody: Uint8Array;
   payloadSHA256: string;
+}
+
+export interface AuthenticatedCrawlerRequest extends AuthenticatedCrawlerRawRequest {
   batch: CrawlerBatch;
 }
 
@@ -27,7 +30,8 @@ export interface AuthenticatedCatalogPublisherRequest {
 export interface APIContext {
   request: Request;
   env: Cloudflare.Env;
-  authenticatedCrawlerRequest?: AuthenticatedCrawlerRequest;
+  authenticatedCrawlerRequest?:
+    AuthenticatedCrawlerRawRequest | AuthenticatedCrawlerRequest;
   authenticatedCatalogPublisherRequest?: AuthenticatedCatalogPublisherRequest;
 }
 

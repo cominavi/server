@@ -103,6 +103,7 @@ test("catalog claims are single-flight and publication atomically exposes only t
     name: "Comic Market 108",
     publishedAt: 103,
     sourceUpdatedAt: 90,
+    sourceMainSHA256: "c".repeat(64),
     artifact: {
       url: `/api/v2/catalogs/108/versions/${versionID}/artifact`,
       sha256: "e".repeat(64),

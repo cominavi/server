@@ -11,6 +11,7 @@ const migrations = [
   "migrations/0005_shared_plan_crdt_notifications.sql",
   "migrations/0006_notification_inbox.sql",
   "migrations/0007_catalog_genres_all_days.sql",
+  "migrations/0008_circle_tag_overlays.sql",
 ];
 
 test("provider-neutral migration preserves every existing user-dependent row in a D1 transaction", () => {
@@ -81,6 +82,7 @@ test("provider-neutral migration preserves every existing user-dependent row in 
   `);
   database.exec(readFileSync(migrations[5], "utf8"));
   database.exec(readFileSync(migrations[6], "utf8"));
+  database.exec(readFileSync(migrations[7], "utf8"));
   database.exec("COMMIT");
 
   assert.deepEqual(
@@ -158,7 +160,9 @@ test("provider-neutral migration preserves every existing user-dependent row in 
           `SELECT name FROM sqlite_master
          WHERE type = 'table' AND name IN (
            'catalog_versions', 'catalog_circles', 'catalog_artifacts',
-           'provider_credentials'
+           'provider_credentials', 'circle_tag_overlay_versions',
+           'circle_tag_overlay_heads',
+           'circle_tag_overlay_publication_receipts'
          ) ORDER BY name`,
         )
         .all() as Array<{ name: string }>
@@ -167,6 +171,9 @@ test("provider-neutral migration preserves every existing user-dependent row in 
       { name: "catalog_artifacts" },
       { name: "catalog_circles" },
       { name: "catalog_versions" },
+      { name: "circle_tag_overlay_heads" },
+      { name: "circle_tag_overlay_publication_receipts" },
+      { name: "circle_tag_overlay_versions" },
       { name: "provider_credentials" },
     ],
   );

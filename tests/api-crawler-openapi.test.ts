@@ -153,6 +153,61 @@ test("v2 crawler ingress authenticates exact bytes and returns 202 then 200 repl
   });
 });
 
+test("crawler ingress rejects an open oversized request stream without waiting on a cloned tee", async () => {
+  const database = setup();
+  const app = createHomepageApp(() => new Response("astro"));
+  const env = {
+    COMINAVI_DB: database.binding,
+    COMINAVI_CRAWLER_WEBHOOK_SECRET: secret,
+    COMINAVI_PUSH_QUEUE: new RecordingQueue().binding,
+  } as Cloudflare.Env;
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array(1_000_001));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  const timestamp = String(Math.floor(Date.now() / 1_000));
+  const request = new Request(
+    "https://cominavi.net/api/v2/internal/crawler/events",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey,
+        "X-ComiNavi-Timestamp": timestamp,
+        "X-ComiNavi-Signature": `v1=${"0".repeat(64)}`,
+      },
+      body,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" },
+  );
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const response = await Promise.race([
+      app.fetch(request, env, executionContext),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("oversized crawler body rejection timed out")),
+          1_000,
+        );
+      }),
+    ]);
+    assert.equal(response.status, 413);
+    assert.equal(
+      (await response.json<{ error: string }>()).error,
+      "invalid_crawler_payload",
+    );
+    assert.equal(cancelled, true);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+});
+
 function sign(timestamp: string, body: string): string {
   return createHmac("sha256", secret)
     .update(`${timestamp}.${idempotencyKey}.`)

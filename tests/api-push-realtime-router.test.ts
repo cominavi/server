@@ -52,7 +52,7 @@ test("push and realtime routers publish non-nullable OpenAPI contracts", async (
   }>;
   assert.deepEqual(
     updateParameters.map((parameter) => parameter.name),
-    ["eventNumber", "afterCursor"],
+    ["eventNumber", "afterCursor", "tagRevision"],
   );
   assert.doesNotMatch(JSON.stringify(document), /"nullable"/);
   assert.doesNotMatch(JSON.stringify(document), /"null"/);
