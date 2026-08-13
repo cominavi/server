@@ -151,6 +151,21 @@ test("snapshot publication preserves mixed-case handles and accepts RFC3339 offs
     stored?.events?.[0]?.post.author.handle,
     publication.snapshot.events[0]!.post.author.handle,
   );
+  const reset = await app.fetch(
+    new Request(
+      "https://cominavi.net/api/v2/events/108/updates?afterCursor=0&publicationRevision=none",
+    ),
+    environment(database, bucket),
+    executionContext,
+  );
+  assert.equal(reset.status, 200);
+  const resetBody = await reset.json<{
+    updates: Array<{ occurredAt: string }>;
+  }>();
+  assert.equal(
+    resetBody.updates[0]?.occurredAt,
+    publication.snapshot.events[0]!.post.occurredAt,
+  );
   assert.equal((await call(snapshotSecret)).status, 200);
 
   const tamperedPublication = structuredClone(publication);

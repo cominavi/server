@@ -56,7 +56,7 @@ const realtimeUpdateSchema = z.object({
   ]),
   stateValue: z.string().min(1),
   confidence: z.enum(["high", "medium", "low", "unmatched"]),
-  occurredAt: z.iso.datetime(),
+  occurredAt: z.iso.datetime({ offset: true }),
   sourceRevision: z.number().int().positive(),
   post: z.object({
     id: z.string().min(1),
