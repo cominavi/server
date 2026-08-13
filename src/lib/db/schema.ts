@@ -11,7 +11,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-// This schema mirrors the final D1 shape after migrations 0001-0008.
+// This schema mirrors the final D1 shape after migrations 0001-0009.
 // The checked-in SQL migrations remain deployment authority; this module
 // provides the typed query surface for Worker services.
 
@@ -560,6 +560,200 @@ export const circleTagOverlayPublicationReceipts = sqliteTable(
     ),
     check(
       "circle_tag_overlay_publication_receipts_check_5",
+      sql.raw("json_valid(result_json)"),
+    ),
+  ],
+);
+
+export const crawlerSnapshotObjectCleanup = sqliteTable(
+  "crawler_snapshot_object_cleanup",
+  {
+    objectKey: text("object_key").primaryKey(),
+    eventNumber: integer("event_number").notNull(),
+    revision: text("revision").notNull(),
+    objectSHA256: text("object_sha256").notNull(),
+    state: text("state", { enum: ["queued", "leased"] as const })
+      .notNull()
+      .default(sql.raw("'queued'")),
+    attemptCount: integer("attempt_count").notNull().default(sql.raw("0")),
+    leaseID: text("lease_id"),
+    leaseExpiresAt: integer("lease_expires_at"),
+    availableAt: integer("available_at").notNull(),
+    lastError: text("last_error"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    index("crawler_snapshot_object_cleanup_ready").on(
+      table.state,
+      table.availableAt,
+      table.createdAt,
+    ),
+    check(
+      "crawler_snapshot_object_cleanup_check_1",
+      sql.raw("state IN ('queued', 'leased')"),
+    ),
+    check(
+      "crawler_snapshot_object_cleanup_check_2",
+      sql.raw("event_number > 0 AND event_number <= 10000"),
+    ),
+    check(
+      "crawler_snapshot_object_cleanup_check_3",
+      sql.raw("length(revision) = 64 AND revision NOT GLOB '*[^0-9a-f]*'"),
+    ),
+    check(
+      "crawler_snapshot_object_cleanup_check_4",
+      sql.raw(
+        "length(object_sha256) = 64 AND object_sha256 NOT GLOB '*[^0-9a-f]*'",
+      ),
+    ),
+  ],
+);
+
+export const crawlerSnapshotVersions = sqliteTable(
+  "crawler_snapshot_versions",
+  {
+    eventNumber: integer("event_number").notNull(),
+    revision: text("revision").notNull(),
+    schemaVersion: integer("schema_version").notNull(),
+    generation: integer("generation").notNull(),
+    catalogPayloadSHA256: text("catalog_payload_sha256").notNull(),
+    matchingPolicyRevision: text("matching_policy_revision").notNull(),
+    observedAt: integer("observed_at").notNull(),
+    updateCount: integer("update_count").notNull(),
+    objectKey: text("object_key").notNull(),
+    objectSHA256: text("object_sha256").notNull(),
+    byteCount: integer("byte_count").notNull(),
+    publicationCursor: integer("publication_cursor").notNull(),
+    publishedAt: integer("published_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.eventNumber, table.revision] }),
+    unique().on(table.eventNumber, table.generation),
+    unique().on(table.objectKey),
+    check(
+      "crawler_snapshot_versions_check_1",
+      sql.raw("event_number > 0 AND event_number <= 10000"),
+    ),
+    check("crawler_snapshot_versions_check_2", sql.raw("schema_version = 1")),
+    check("crawler_snapshot_versions_check_3", sql.raw("generation > 0")),
+    check(
+      "crawler_snapshot_versions_check_4",
+      sql.raw("length(revision) = 64 AND revision NOT GLOB '*[^0-9a-f]*'"),
+    ),
+    check(
+      "crawler_snapshot_versions_check_5",
+      sql.raw(
+        "length(catalog_payload_sha256) = 64 AND catalog_payload_sha256 NOT GLOB '*[^0-9a-f]*'",
+      ),
+    ),
+    check(
+      "crawler_snapshot_versions_check_6",
+      sql.raw("length(matching_policy_revision) BETWEEN 1 AND 128"),
+    ),
+    check(
+      "crawler_snapshot_versions_check_7",
+      sql.raw("update_count >= 0 AND update_count <= 20000"),
+    ),
+    check(
+      "crawler_snapshot_versions_check_8",
+      sql.raw(
+        "length(object_sha256) = 64 AND object_sha256 NOT GLOB '*[^0-9a-f]*'",
+      ),
+    ),
+    check(
+      "crawler_snapshot_versions_check_9",
+      sql.raw("byte_count > 0 AND byte_count <= 16777216"),
+    ),
+    check(
+      "crawler_snapshot_versions_check_10",
+      sql.raw("publication_cursor >= 0"),
+    ),
+  ],
+);
+
+export const crawlerSnapshotHeads = sqliteTable(
+  "crawler_snapshot_heads",
+  {
+    eventNumber: integer("event_number").primaryKey(),
+    revision: text("revision").notNull(),
+    generation: integer("generation").notNull(),
+    publicationCursor: integer("publication_cursor").notNull(),
+    publicationIdempotencyKey: text("publication_idempotency_key").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.eventNumber, table.revision],
+      foreignColumns: [
+        crawlerSnapshotVersions.eventNumber,
+        crawlerSnapshotVersions.revision,
+      ],
+    }),
+    unique().on(table.eventNumber, table.generation),
+    check(
+      "crawler_snapshot_heads_check_1",
+      sql.raw("event_number > 0 AND event_number <= 10000"),
+    ),
+    check(
+      "crawler_snapshot_heads_check_2",
+      sql.raw("length(revision) = 64 AND revision NOT GLOB '*[^0-9a-f]*'"),
+    ),
+    check("crawler_snapshot_heads_check_3", sql.raw("generation > 0")),
+    check("crawler_snapshot_heads_check_4", sql.raw("publication_cursor >= 0")),
+    check(
+      "crawler_snapshot_heads_check_5",
+      sql.raw("length(publication_idempotency_key) BETWEEN 16 AND 200"),
+    ),
+  ],
+);
+
+export const crawlerSnapshotPublicationReceipts = sqliteTable(
+  "crawler_snapshot_publication_receipts",
+  {
+    idempotencyKey: text("idempotency_key").primaryKey(),
+    payloadSHA256: text("payload_sha256").notNull(),
+    eventNumber: integer("event_number").notNull(),
+    baseRevision: text("base_revision").notNull(),
+    revision: text("revision").notNull(),
+    generation: integer("generation").notNull(),
+    resultJSON: text("result_json").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.eventNumber, table.revision],
+      foreignColumns: [
+        crawlerSnapshotVersions.eventNumber,
+        crawlerSnapshotVersions.revision,
+      ],
+    }),
+    check(
+      "crawler_snapshot_publication_receipts_check_1",
+      sql.raw(
+        "length(payload_sha256) = 64 AND payload_sha256 NOT GLOB '*[^0-9a-f]*'",
+      ),
+    ),
+    check(
+      "crawler_snapshot_publication_receipts_check_2",
+      sql.raw("event_number > 0 AND event_number <= 10000"),
+    ),
+    check(
+      "crawler_snapshot_publication_receipts_check_3",
+      sql.raw(
+        "base_revision = 'none' OR (length(base_revision) = 64 AND base_revision NOT GLOB '*[^0-9a-f]*')",
+      ),
+    ),
+    check(
+      "crawler_snapshot_publication_receipts_check_4",
+      sql.raw("length(revision) = 64 AND revision NOT GLOB '*[^0-9a-f]*'"),
+    ),
+    check(
+      "crawler_snapshot_publication_receipts_check_5",
+      sql.raw("generation > 0"),
+    ),
+    check(
+      "crawler_snapshot_publication_receipts_check_6",
       sql.raw("json_valid(result_json)"),
     ),
   ],
@@ -2619,6 +2813,10 @@ export const migratedTables = {
   circle_tag_overlay_object_cleanup: circleTagOverlayObjectCleanup,
   circle_tag_overlay_publication_receipts: circleTagOverlayPublicationReceipts,
   circle_tag_overlay_versions: circleTagOverlayVersions,
+  crawler_snapshot_heads: crawlerSnapshotHeads,
+  crawler_snapshot_object_cleanup: crawlerSnapshotObjectCleanup,
+  crawler_snapshot_publication_receipts: crawlerSnapshotPublicationReceipts,
+  crawler_snapshot_versions: crawlerSnapshotVersions,
   circle_state_heads: circleStateHeads,
   circle_update_events: circleUpdateEvents,
   circle_update_targets: circleUpdateTargets,

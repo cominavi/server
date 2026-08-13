@@ -133,6 +133,63 @@ each circle/state head only when the observation is newer, and creates at most
 one delivery per event/user/device. An A+B update consequently produces one
 notification, not two.
 
+### Complete artwork snapshot publication
+
+After every successful retained crawl, the collector publishes its compact,
+complete `shinagaki`/`cover` state to
+`POST /api/v2/internal/crawler/realtime-snapshots`. This endpoint uses the
+separate `COMINAVI_CRAWLER_SNAPSHOT_SECRET`; the ordinary append-only webhook
+secret cannot replace a snapshot. It uses the same exact-byte HMAC headers,
+rejects bodies above 16 MiB, checks every WCID against the durable
+`catalog_stable_circles` authority, and stores normalized JSON as an immutable
+private `COMINAVI_CATALOGS` object. A publication may bind either the current
+catalog's `source_main_sha256` or the exact catalog SHA of its compare-and-swap
+base snapshot. That narrow bridge keeps the last snapshot available across a
+catalog rollover while the collector downloads and evaluates the new source.
+
+The envelope contains `baseRevision` and a complete schema-version-1 snapshot
+with a monotonically increasing `generation`. `revision` is the SHA-256 of the
+UTF-8 semantic JSON with fields in this exact order: `schemaVersion`, `source`,
+`eventNumber`, `generation`, `catalogPayloadSHA256`,
+`matchingPolicyRevision`, `observedAt`, `events`. Events and each event's WCID
+targets must already be canonically ordered. D1 atomically captures the current
+append cursor while activating the compare-and-swap head and durable receipt.
+A stale base or non-successor generation conflicts, so a delayed crawler cannot
+roll back a later publication.
+
+Public update responses expose `publicationRevision`,
+`publicationGeneration`, `publicationCursor`, and `resetRequired`. Legacy
+query-free requests receive the active complete artwork snapshot. A v3 client
+passes its current revision; a change returns one replacement baseline with the
+complete artwork snapshot plus pre-fence attendance/inventory/presence events,
+followed by any post-fence append events. This removes stale artwork targets
+without losing live booth state.
+
+The collector reads authority with a signed, operation-bound, no-store
+`POST /api/v2/internal/crawler/realtime-snapshot-authority` request. Its body
+uses `operation: "readSnapshotAuthority"`; the response returns the active
+snapshot revision/generation/cursor, the snapshot's source-main SHA, and the
+current catalog version/SHA/byte count. An optional proposed revision and
+generation returns a tagged `activated` durable historical proof or an explicit
+`notActivated` result, allowing a lost-response outbox to resolve without
+assuming that a superseded publication never activated. When no snapshot has
+yet activated, snapshot revision and source-main SHA use the literal `none`
+token instead of a nullable generated-client branch.
+
+The authority response points to
+`POST /api/v2/internal/crawler/catalog-source-main`. This separate signed body
+uses `operation: "downloadActiveCatalogSourceMain"` and pins the advertised
+event, version, and source-main SHA. The Worker streams only the active
+`source_main` artifact from the private R2 binding and returns exact
+`Content-Length`, `Digest`, `ETag`, catalog-version, and SHA headers. Both reads
+use `COMINAVI_CRAWLER_SNAPSHOT_SECRET`, enforce distinct deterministic
+idempotency-key namespaces, and emit browser/CDN `no-store`; neither creates a
+public URL or grants the collector Wrangler/D1/R2 credentials. Sentry request
+body capture is disabled for every `/api/v2/internal/` route so instrumentation
+cannot tee or retain the exact signed JSON before the bounded authenticator;
+the source response remains a binary private-R2 stream rather than an observed
+JSON body.
+
 ### Circle tag overlay publication
 
 `POST /api/v2/internal/crawler/tag-overlays` uses the same three crawler HMAC
@@ -173,9 +230,12 @@ that prove a token is invalid disable that device. The two-minute scheduled
 handler recovers due D1 deliveries that were committed before a queue publish
 failed.
 
-## Initial C108 seed
+## Retiring the initial C108 seed
 
-Run `pnpm seed:c108` to regenerate `seed/c108-realtime.sql` from the pinned
-Circle.ms SQLite catalog and retained collector export. Apply it with Wrangler
-only after verifying the active account is exactly `GalvinGao`. Seed rows are
-idempotent and non-notifying.
+The SQL seed is legacy bootstrap data and must not be reapplied after snapshot
+publication is enabled. Once C108 has an active `crawler_snapshot_heads` row,
+run `tools/retire-c108-legacy-realtime-seed.sql` once. Its leading guard aborts
+the Wrangler SQL execution if no snapshot is active; it does not depend on an
+explicit transaction. It removes only `source = 'seed:c108-local'` events and
+dependent targets/heads plus unreferenced seed batches, posts/media, and C108
+seed receipts. It does not alter circles, user data, or true realtime events.

@@ -2,6 +2,7 @@ import { authRouter } from "./auth";
 import { catalogsRouter } from "./routers/catalogs";
 import { catalogControlRouter } from "./routers/catalog-control";
 import { crawlerIngressRouter } from "./routers/crawler-ingress";
+import { crawlerSnapshotRouter } from "./routers/crawler-snapshots";
 import { favoritesRouter } from "./routers/favorites";
 import { identityAvatarImportRouter } from "./routers/identity-avatar-import";
 import { notificationRouter } from "./routers/notifications";
@@ -20,7 +21,11 @@ export const apiRouter = {
   },
   internal: {
     catalog: catalogControlRouter,
-    crawler: { ...crawlerIngressRouter, tagOverlays: tagOverlayRouter },
+    crawler: {
+      ...crawlerIngressRouter,
+      realtimeSnapshots: crawlerSnapshotRouter,
+      tagOverlays: tagOverlayRouter,
+    },
   },
   me: {
     profile: profileRouter,

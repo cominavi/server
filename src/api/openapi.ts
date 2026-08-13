@@ -50,6 +50,27 @@ export async function generateOpenAPIDocument() {
           description:
             "Stable collector batch identity. An exact replay returns the existing result; reusing it for different bytes conflicts.",
         },
+        crawlerSnapshotSignature: {
+          type: "apiKey",
+          in: "header",
+          name: "X-ComiNavi-Signature",
+          description:
+            "Dedicated snapshot-publisher HMAC-SHA256 signature: `v1=<64 lowercase hex characters>`. It uses COMINAVI_CRAWLER_SNAPSHOT_SECRET and signs `<X-ComiNavi-Timestamp>.<Idempotency-Key>.<exact request body>`.",
+        },
+        crawlerSnapshotTimestamp: {
+          type: "apiKey",
+          in: "header",
+          name: "X-ComiNavi-Timestamp",
+          description:
+            "Unix timestamp in seconds. Snapshot publication accepts a maximum clock skew of five minutes.",
+        },
+        crawlerSnapshotIdempotencyKey: {
+          type: "apiKey",
+          in: "header",
+          name: "Idempotency-Key",
+          description:
+            "Stable complete-snapshot publication identity. Exact replays recover the durable receipt; reusing it for different bytes conflicts.",
+        },
         catalogPublisherSignature: {
           type: "apiKey",
           in: "header",

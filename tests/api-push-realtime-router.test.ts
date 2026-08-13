@@ -52,7 +52,7 @@ test("push and realtime routers publish non-nullable OpenAPI contracts", async (
   }>;
   assert.deepEqual(
     updateParameters.map((parameter) => parameter.name),
-    ["eventNumber", "afterCursor", "tagRevision"],
+    ["eventNumber", "afterCursor", "publicationRevision", "tagRevision"],
   );
   assert.doesNotMatch(JSON.stringify(document), /"nullable"/);
   assert.doesNotMatch(JSON.stringify(document), /"null"/);
@@ -162,6 +162,10 @@ test("realtime transport preserves the complete snapshot and pages after a curso
   assert.deepEqual(Object.keys(body).sort(), [
     "eventNumber",
     "hasMore",
+    "publicationCursor",
+    "publicationGeneration",
+    "publicationRevision",
+    "resetRequired",
     "updates",
   ]);
 

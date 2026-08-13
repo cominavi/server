@@ -13,6 +13,10 @@ import {
   parseCrawlerBatch,
 } from "../lib/server/crawler-ingest";
 import { maximumTagOverlayPublicationBytes } from "../lib/server/tag-overlays";
+import {
+  maximumCrawlerSnapshotAuthorityBytes,
+  maximumCrawlerSnapshotPublicationBytes,
+} from "../lib/server/crawler-snapshots";
 import { authenticateCatalogPublisherRequest } from "../lib/server/catalog-publisher-auth";
 import type {
   AuthenticatedCatalogPublisherRequest,
@@ -37,35 +41,91 @@ const realtimeUpdatesBrowserCacheControl =
 const realtimeUpdatesCDNCacheControl =
   "public, max-age=60, stale-while-revalidate=300, stale-if-error=86400";
 
+export const sentrySensitiveCrawlerRequestHeaders = [
+  "x-cominavi-signature",
+  "x-cominavi-timestamp",
+  "idempotency-key",
+] as const;
+
+const sentrySensitiveCrawlerRequestHeaderSet = new Set<string>(
+  sentrySensitiveCrawlerRequestHeaders,
+);
+const sentrySensitiveCrawlerSpanAttributeSet = new Set(
+  sentrySensitiveCrawlerRequestHeaders.map(
+    (header) => `http.request.header.${header.replaceAll("-", "_")}`,
+  ),
+);
+
+export function scrubSensitiveCrawlerHeadersFromSentryEvent<
+  T extends {
+    request?: { headers?: Record<string, string> };
+    spans?: Array<{ data?: Record<string, unknown> }>;
+  },
+>(event: T): T {
+  const headers = event.request?.headers;
+  if (headers) {
+    for (const header of Object.keys(headers)) {
+      if (sentrySensitiveCrawlerRequestHeaderSet.has(header.toLowerCase())) {
+        delete headers[header];
+      }
+    }
+  }
+  for (const span of event.spans ?? []) {
+    scrubSensitiveCrawlerHeadersFromSentrySpan(span);
+  }
+  return event;
+}
+
+export function scrubSensitiveCrawlerHeadersFromSentrySpan<
+  T extends { data?: Record<string, unknown> },
+>(span: T): T {
+  if (span.data) {
+    for (const attribute of Object.keys(span.data)) {
+      if (sentrySensitiveCrawlerSpanAttributeSet.has(attribute.toLowerCase())) {
+        delete span.data[attribute];
+      }
+    }
+  }
+  return span;
+}
+
+export function createHomepageSentryOptions(): Sentry.CloudflareOptions {
+  return {
+    dsn: "https://5366d55254bddce30ce78749ace96c70@o4508052459225088.ingest.us.sentry.io/4511898103709696",
+    tracesSampleRate: 1.0,
+    enableLogs: true,
+    dataCollection: {
+      userInfo: true,
+      httpHeaders: {
+        request: { deny: [...sentrySensitiveCrawlerRequestHeaders] },
+      },
+      httpBodies: [
+        "incomingRequest",
+        "outgoingRequest",
+        "incomingResponse",
+        "outgoingResponse",
+      ],
+    },
+    beforeSend: scrubSensitiveCrawlerHeadersFromSentryEvent,
+    beforeSendTransaction: scrubSensitiveCrawlerHeadersFromSentryEvent,
+    beforeSendSpan: scrubSensitiveCrawlerHeadersFromSentrySpan,
+    integrations: (defaults) => [
+      ...defaults.filter((integration) => integration.name !== "HttpServer"),
+      Sentry.httpServerIntegration({
+        // Sentry v10 captures request bodies independently of the
+        // dataCollection list. Never tee or await the exact-byte signed
+        // internal streams before their bounded authenticators run.
+        ignoreRequestBody: (url) =>
+          new URL(url).pathname.startsWith("/api/v2/internal/"),
+      }),
+    ],
+  };
+}
+
 export function createHomepageApp(astroFetch: AstroFetch) {
   const app = new Hono<{ Bindings: Cloudflare.Env }>();
 
-  app.use(
-    Sentry.sentry(app, {
-      dsn: "https://5366d55254bddce30ce78749ace96c70@o4508052459225088.ingest.us.sentry.io/4511898103709696",
-      tracesSampleRate: 1.0,
-      enableLogs: true,
-      dataCollection: {
-        userInfo: true,
-        httpBodies: [
-          "incomingRequest",
-          "outgoingRequest",
-          "incomingResponse",
-          "outgoingResponse",
-        ],
-      },
-      integrations: (defaults) => [
-        ...defaults.filter((integration) => integration.name !== "HttpServer"),
-        Sentry.httpServerIntegration({
-          // Sentry v10 captures request bodies independently of the
-          // dataCollection list. Never tee or await the exact-byte signed
-          // internal streams before their bounded authenticators run.
-          ignoreRequestBody: (url) =>
-            new URL(url).pathname.startsWith("/api/v2/internal/"),
-        }),
-      ],
-    }),
-  );
+  app.use(Sentry.sentry(app, createHomepageSentryOptions()));
 
   app.get("/api/openapi.json", async (context) => {
     return context.json(await generateOpenAPIDocument(), 200, {
@@ -115,6 +175,53 @@ export function createHomepageApp(astroFetch: AstroFetch) {
       return apiErrorResponse(error);
     }
   });
+
+  app.post("/api/v2/internal/crawler/realtime-snapshots", async (context) => {
+    try {
+      const authenticatedCrawlerRequest = await authenticateCrawlerRequest(
+        context.req.raw,
+        context.env.COMINAVI_CRAWLER_SNAPSHOT_SECRET,
+        Date.now(),
+        maximumCrawlerSnapshotPublicationBytes,
+      );
+      return handleOpenAPIRequest(
+        context,
+        { authenticatedCrawlerRequest },
+        crawlerJSONTransportRequest(
+          context.req.raw,
+          authenticatedCrawlerRequest.rawBody,
+        ),
+      );
+    } catch (error) {
+      return apiErrorResponse(error);
+    }
+  });
+
+  for (const path of [
+    "/api/v2/internal/crawler/realtime-snapshot-authority",
+    "/api/v2/internal/crawler/catalog-source-main",
+  ]) {
+    app.post(path, async (context) => {
+      try {
+        const authenticatedCrawlerRequest = await authenticateCrawlerRequest(
+          context.req.raw,
+          context.env.COMINAVI_CRAWLER_SNAPSHOT_SECRET,
+          Date.now(),
+          maximumCrawlerSnapshotAuthorityBytes,
+        );
+        return handleOpenAPIRequest(
+          context,
+          { authenticatedCrawlerRequest },
+          crawlerJSONTransportRequest(
+            context.req.raw,
+            authenticatedCrawlerRequest.rawBody,
+          ),
+        );
+      } catch (error) {
+        return apiErrorResponse(error);
+      }
+    });
+  }
 
   for (const path of [
     "/api/v2/internal/catalog-publications",
@@ -351,14 +458,29 @@ async function withCanonicalJSONHeaders(
 
 function isCacheableRealtimeUpdatesURL(url: URL): boolean {
   if (url.search.length === 0) return true;
-  const match =
-    /^\?(?:(?:afterCursor=(0|[1-9]\d*)(?:&tagRevision=(none|[0-9a-f]{64}))?)|(?:tagRevision=(none|[0-9a-f]{64})))$/.exec(
-      url.search,
-    );
-  if (!match) return false;
-  if (match[1] === undefined) return true;
-  const cursor = Number(match[1]);
-  return Number.isSafeInteger(cursor) && cursor >= 0;
+  const expectedOrder = ["afterCursor", "publicationRevision", "tagRevision"];
+  const entries = Array.from(url.searchParams.entries());
+  if (
+    entries.length === 0 ||
+    entries.length > expectedOrder.length ||
+    new Set(entries.map(([key]) => key)).size !== entries.length
+  ) {
+    return false;
+  }
+  let lastIndex = -1;
+  for (const [key, value] of entries) {
+    const index = expectedOrder.indexOf(key);
+    if (index <= lastIndex) return false;
+    lastIndex = index;
+    if (key === "afterCursor") {
+      if (!/^(?:0|[1-9]\d*)$/.test(value)) return false;
+      const cursor = Number(value);
+      if (!Number.isSafeInteger(cursor) || cursor < 0) return false;
+    } else if (!/^(?:none|[0-9a-f]{64})$/.test(value)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 async function responseETag(body: ArrayBuffer): Promise<string> {

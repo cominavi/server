@@ -175,6 +175,20 @@ const crawlerHMACSecurity = oo.spec(
   }),
 );
 
+const crawlerSnapshotHMACSecurity = oo.spec(
+  api.middleware(async ({ next }) => next()),
+  (operation) => ({
+    ...operation,
+    security: [
+      {
+        crawlerSnapshotSignature: [],
+        crawlerSnapshotTimestamp: [],
+        crawlerSnapshotIdempotencyKey: [],
+      },
+    ],
+  }),
+);
+
 const catalogPublisherHMACSecurity = oo.spec(
   api.middleware(async ({ next }) => next()),
   (operation) => ({
@@ -208,6 +222,11 @@ export const predecessorTokenProcedure = baseProcedure.use(bearerSecurity);
 
 /** An internal collector operation authenticated by its exact-body HMAC. */
 export const crawlerProcedure = baseProcedure.use(crawlerHMACSecurity);
+
+/** A complete snapshot publisher authenticated by its dedicated exact-body HMAC. */
+export const crawlerSnapshotProcedure = baseProcedure.use(
+  crawlerSnapshotHMACSecurity,
+);
 
 /** An internal catalog control-plane operation authenticated by exact-body HMAC. */
 export const catalogPublisherProcedure = baseProcedure.use(

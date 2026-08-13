@@ -511,7 +511,10 @@ test("updates API preserves legacy bodies and conditionally serves a verified ov
     executionContext,
   );
   const legacyBody = await legacyBefore.text();
-  assert.equal(legacyBody, '{"eventNumber":108,"hasMore":false,"updates":[]}');
+  assert.equal(
+    legacyBody,
+    '{"eventNumber":108,"hasMore":false,"publicationRevision":"none","publicationGeneration":0,"publicationCursor":0,"resetRequired":false,"updates":[]}',
+  );
 
   const absent = await app.fetch(
     new Request(`${legacyURL}?tagRevision=none`),
@@ -521,6 +524,10 @@ test("updates API preserves legacy bodies and conditionally serves a verified ov
   assert.deepEqual(await absent.json(), {
     eventNumber: 108,
     hasMore: false,
+    publicationRevision: "none",
+    publicationGeneration: 0,
+    publicationCursor: 0,
+    resetRequired: false,
     updates: [],
     tagOverlayStatus: "absent",
   });
@@ -606,6 +613,10 @@ test("updates API preserves legacy bodies and conditionally serves a verified ov
   assert.deepEqual(await current.json(), {
     eventNumber: 108,
     hasMore: false,
+    publicationRevision: "none",
+    publicationGeneration: 0,
+    publicationCursor: 0,
+    resetRequired: false,
     updates: [],
     tagOverlayStatus: "current",
   });
@@ -787,7 +798,7 @@ test("crawler publication OpenAPI documents HMAC, conditional updates, and recei
     (updates?.parameters ?? []).map((parameter) =>
       "name" in parameter ? parameter.name : undefined,
     ),
-    ["eventNumber", "afterCursor", "tagRevision"],
+    ["eventNumber", "afterCursor", "publicationRevision", "tagRevision"],
   );
   assert.match(JSON.stringify(updates), /tagOverlay/);
 });

@@ -44,7 +44,7 @@ const realtimeCircleSchema = z.object({
 });
 
 const realtimeUpdateSchema = z.object({
-  cursor: z.number().int().positive(),
+  cursor: z.number().int().nonnegative(),
   eventKey: z.string().min(1),
   updateKind: z.string().min(1),
   stateKind: z.enum([
@@ -76,6 +76,10 @@ const realtimeUpdateSchema = z.object({
 const realtimeSnapshotSchema = z.object({
   eventNumber: z.number().int().positive().max(10_000),
   hasMore: z.boolean(),
+  publicationRevision: z.string().regex(/^(?:none|[0-9a-f]{64})$/),
+  publicationGeneration: z.number().int().nonnegative(),
+  publicationCursor: z.number().int().nonnegative(),
+  resetRequired: z.boolean(),
   updates: z.array(realtimeUpdateSchema),
   tagOverlayStatus: z
     .enum(["current", "absent", "invalidated", "unavailable"])
@@ -148,6 +152,10 @@ export const listRealtimeUpdates = publicProcedure
       params: z.object({ eventNumber: eventNumberSchema }),
       query: z.object({
         afterCursor: realtimeCursorSchema.optional(),
+        publicationRevision: z
+          .string()
+          .regex(/^(?:none|[0-9a-f]{64})$/)
+          .optional(),
         tagRevision: tagOverlayRevisionSchema.optional(),
       }),
     }),
@@ -157,8 +165,10 @@ export const listRealtimeUpdates = publicProcedure
     const eventNumber = parseEventNumber(String(input.params.eventNumber));
     const result = await loadRealtimeUpdates(
       context.env.COMINAVI_DB,
+      context.env.COMINAVI_CATALOGS,
       eventNumber,
       input.query.afterCursor,
+      input.query.publicationRevision,
     );
     const tagOverlayResult =
       input.query.tagRevision === undefined

@@ -226,7 +226,7 @@ export function parseCrawlerBatch(rawBody: Uint8Array): CrawlerBatch {
   ) {
     throw invalidCrawlerPayload();
   }
-  const events = value.events.map(parseEvent);
+  const events = value.events.map(parseCrawlerEvent);
   if (
     new Set(events.map((event) => event.eventKey)).size !== events.length ||
     crawlerStatementCount(events) > maximumStatements
@@ -580,7 +580,7 @@ function headStatement(
      AND excluded.event_key > ${circleStateHeads.eventKey})`;
 }
 
-function parseEvent(value: unknown): CrawlerEvent {
+export function parseCrawlerEvent(value: unknown): CrawlerEvent {
   if (!isRecord(value)) throw invalidCrawlerPayload();
   const stateKind = value.stateKind;
   const allowedValues =

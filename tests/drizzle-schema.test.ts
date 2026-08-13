@@ -17,6 +17,7 @@ const migrations = [
   "migrations/0006_notification_inbox.sql",
   "migrations/0007_catalog_genres_all_days.sql",
   "migrations/0008_circle_tag_overlays.sql",
+  "migrations/0009_crawler_realtime_snapshots.sql",
 ];
 
 const expectedTextEnums: Record<string, string[]> = {
@@ -61,6 +62,7 @@ const expectedTextEnums: Record<string, string[]> = {
   "catalog_refresh_jobs.state": ["queued", "leased", "published", "failed"],
   "catalog_versions.state": ["staging", "published", "superseded", "failed"],
   "circle_tag_overlay_object_cleanup.state": ["queued", "leased"],
+  "crawler_snapshot_object_cleanup.state": ["queued", "leased"],
   "circle_update_events.state_kind": [
     "attendance",
     "inventory",
