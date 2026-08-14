@@ -10,6 +10,7 @@ import {
   FollowingImportError,
   importFollowingSnapshot,
   processFollowingSnapshotCleanup,
+  streamFollowingSnapshot,
   type FollowingImportBindings,
 } from "../src/lib/server/following-import";
 import { SQLiteD1Database } from "./sqlite-d1";
@@ -19,6 +20,51 @@ const identity: CominaviIdentity = {
   userID: 7,
   authVersion: 1,
 };
+
+test("streaming import emits page progress and releases a cancelled lease", async () => {
+  const database = setup();
+  const snapshots = new FakeKV();
+  const bindings: FollowingImportBindings = {
+    COMINAVI_DB: database.binding,
+    COMINAVI_FOLLOWING_SNAPSHOTS: snapshots as unknown as KVNamespace,
+    TWITTERAPI_IO_API_KEY: "key",
+  };
+  const stream = streamFollowingSnapshot(
+    identity,
+    "owner",
+    bindings,
+    1_000_000,
+    async () =>
+      Response.json({
+        status: "success",
+        followings: [{ id: "x-1", userName: "circle_a" }],
+        has_next_page: true,
+        next_cursor: "next",
+      }),
+  );
+
+  const first = await stream.next();
+  assert.equal(first.done, false);
+  if (!first.done) {
+    assert.equal(first.value.page, 1);
+    assert.equal(first.value.fetchedCount, 1);
+  }
+  await stream.return(undefined as never);
+
+  assert.deepEqual(
+    database.rows(
+      "SELECT status, lease_id, next_allowed_at, last_error FROM following_imports",
+    ),
+    [
+      {
+        status: "failed",
+        lease_id: null,
+        next_allowed_at: 1_000,
+        last_error: "import_cancelled",
+      },
+    ],
+  );
+});
 
 test("six-hour lease serves same-user cache and rejects account switching", async () => {
   const database = setup();

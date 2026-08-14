@@ -19,9 +19,10 @@ import {
 } from "../db/schema";
 import type { CominaviIdentity } from "./cominavi-auth";
 import {
-  fetchTwitterFollowings,
   normalizeTwitterUserName,
+  streamTwitterFollowings,
   TwitterFollowingError,
+  type TwitterFollowingProgress,
   type TwitterFollowingUser,
 } from "./twitter-followings";
 
@@ -60,6 +61,8 @@ export interface FollowingImportHooks {
   onServerError?: (error: FollowingImportError) => void;
 }
 
+export type FollowingImportProgress = TwitterFollowingProgress;
+
 export class FollowingImportError extends Error {
   constructor(
     readonly code: string,
@@ -81,6 +84,28 @@ export async function importFollowingSnapshot(
   fetcher: typeof fetch = fetch,
   hooks: FollowingImportHooks = {},
 ): Promise<FollowingImportResponse> {
+  const stream = streamFollowingSnapshot(
+    identity,
+    requestedUserName,
+    bindings,
+    nowMilliseconds,
+    fetcher,
+    hooks,
+  );
+  while (true) {
+    const result = await stream.next();
+    if (result.done) return result.value;
+  }
+}
+
+export async function* streamFollowingSnapshot(
+  identity: CominaviIdentity,
+  requestedUserName: string,
+  bindings: FollowingImportBindings,
+  nowMilliseconds = Date.now(),
+  fetcher: typeof fetch = fetch,
+  hooks: FollowingImportHooks = {},
+): AsyncGenerator<FollowingImportProgress, FollowingImportResponse> {
   const userName = normalizeTwitterUserName(requestedUserName);
   if (!userName) {
     throw new FollowingImportError(
@@ -148,8 +173,9 @@ export async function importFollowingSnapshot(
 
   let snapshotKey: string | null = null;
   let publishedSnapshot = false;
+  let leaseSettled = false;
   try {
-    const followings = await fetchTwitterFollowings(
+    const followings = yield* streamTwitterFollowings(
       userName,
       bindings.TWITTERAPI_IO_API_KEY,
       fetcher,
@@ -244,6 +270,7 @@ export async function importFollowingSnapshot(
       );
     }
     publishedSnapshot = true;
+    leaseSettled = true;
 
     if (existing?.snapshot_key && existing.snapshot_key !== snapshotKey) {
       await deleteQueuedSnapshot(
@@ -278,6 +305,7 @@ export async function importFollowingSnapshot(
              AND ${users.authVersion} = ${identity.authVersion}
              AND ${users.deletionPendingAt} IS NULL
          )`);
+    leaseSettled = true;
 
     if (error instanceof FollowingImportError) {
       reportServerError(error, hooks);
@@ -299,6 +327,28 @@ export async function importFollowingSnapshot(
     );
     reportServerError(importError, hooks);
     throw importError;
+  } finally {
+    if (!leaseSettled) {
+      if (!publishedSnapshot && snapshotKey) {
+        await deleteQueuedSnapshot(
+          bindings.COMINAVI_DB,
+          bindings.COMINAVI_FOLLOWING_SNAPSHOTS,
+          snapshotKey,
+        ).catch(() => undefined);
+      }
+      await createDatabase(bindings.COMINAVI_DB).run(sql`
+        UPDATE ${followingImports}
+         SET status = 'failed', lease_id = NULL, next_allowed_at = ${now},
+             last_error = 'import_cancelled'
+         WHERE subject = ${identity.subject} AND lease_id = ${leaseID}
+           AND EXISTS (
+             SELECT 1 FROM ${users}
+             WHERE ${users.id} = ${identity.userID}
+               AND ${users.publicID} = ${identity.subject}
+               AND ${users.authVersion} = ${identity.authVersion}
+               AND ${users.deletionPendingAt} IS NULL
+           )`).catch(() => undefined);
+    }
   }
 }
 

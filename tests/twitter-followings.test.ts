@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   fetchTwitterFollowings,
   normalizeTwitterUserName,
+  streamTwitterFollowings,
   TwitterFollowingError,
 } from "../src/lib/server/twitter-followings";
 
@@ -66,6 +67,56 @@ test("paginates followings and deduplicates stable user IDs", async () => {
       profilePicture: "https://pbs.twimg.com/b.jpg",
     },
   ]);
+});
+
+test("streams each fetched page with cumulative and delta counts", async () => {
+  let requests = 0;
+  const stream = streamTwitterFollowings("owner", "api-key", async () => {
+    requests += 1;
+    return Response.json({
+      status: "success",
+      followings:
+        requests === 1
+          ? [{ id: "1", userName: "circle_a" }]
+          : [
+              { id: "1", userName: "circle_a" },
+              { id: "2", userName: "circle_b" },
+            ],
+      has_next_page: requests === 1,
+      next_cursor: requests === 1 ? "next" : "",
+    });
+  });
+
+  const first = await stream.next();
+  const second = await stream.next();
+  const completed = await stream.next();
+
+  assert.deepEqual(first, {
+    done: false,
+    value: {
+      page: 1,
+      fetchedCount: 1,
+      maximumCount: 5_000,
+      followings: [
+        {
+          id: "1",
+          userName: "circle_a",
+          name: "circle_a",
+          url: "https://x.com/circle_a",
+        },
+      ],
+    },
+  });
+  assert.equal(second.done, false);
+  if (!second.done) {
+    assert.equal(second.value.page, 2);
+    assert.equal(second.value.fetchedCount, 2);
+    assert.deepEqual(second.value.followings.map((user) => user.id), ["2"]);
+  }
+  assert.equal(completed.done, true);
+  if (completed.done) {
+    assert.deepEqual(completed.value.map((user) => user.id), ["1", "2"]);
+  }
 });
 
 test("fails closed on an HTTP 200 TwitterAPI.io error payload", async () => {

@@ -6,6 +6,13 @@ export interface TwitterFollowingUser {
   profilePicture?: string;
 }
 
+export interface TwitterFollowingProgress {
+  page: number;
+  fetchedCount: number;
+  maximumCount: 5_000;
+  followings: TwitterFollowingUser[];
+}
+
 interface TwitterAPIPage {
   followings: unknown[];
   has_next_page: boolean;
@@ -26,7 +33,8 @@ export class TwitterFollowingError extends Error {
 export const maximumTwitterFollowings = 5_000;
 
 const twitterFollowingPageSize = 200;
-const maximumPages = maximumTwitterFollowings / twitterFollowingPageSize;
+export const maximumTwitterFollowingPages =
+  maximumTwitterFollowings / twitterFollowingPageSize;
 const twitterFollowingTimeoutMilliseconds = 10 * 60 * 1_000;
 const twitterFollowingLimitMessage =
   "This X account follows more than 5,000 people. ComiNavi can import up to 5,000 accounts.";
@@ -43,6 +51,18 @@ export async function fetchTwitterFollowings(
   apiKey: string,
   fetcher: typeof fetch = fetch,
 ): Promise<TwitterFollowingUser[]> {
+  const stream = streamTwitterFollowings(userName, apiKey, fetcher);
+  while (true) {
+    const result = await stream.next();
+    if (result.done) return result.value;
+  }
+}
+
+export async function* streamTwitterFollowings(
+  userName: string,
+  apiKey: string,
+  fetcher: typeof fetch = fetch,
+): AsyncGenerator<TwitterFollowingProgress, TwitterFollowingUser[]> {
   const normalizedUserName = normalizeTwitterUserName(userName);
   if (!normalizedUserName) {
     throw new TwitterFollowingError(
@@ -61,7 +81,11 @@ export async function fetchTwitterFollowings(
   const seenCursors = new Set<string>();
   let cursor = "";
 
-  for (let pageNumber = 0; pageNumber < maximumPages; pageNumber += 1) {
+  for (
+    let pageNumber = 0;
+    pageNumber < maximumTwitterFollowingPages;
+    pageNumber += 1
+  ) {
     if (seenCursors.has(cursor)) {
       throw new TwitterFollowingError(
         "twitter_api_pagination_error",
@@ -104,19 +128,31 @@ export async function fetchTwitterFollowings(
       );
     }
 
-    if (pageNumber === maximumPages - 1 && body.has_next_page) {
+    if (
+      pageNumber === maximumTwitterFollowingPages - 1 &&
+      body.has_next_page
+    ) {
       throw twitterFollowingLimitError();
     }
 
+    const addedFollowings: TwitterFollowingUser[] = [];
     for (const rawUser of body.followings) {
       const user = parseFollowingUser(rawUser);
       if (user && !usersByID.has(user.id)) {
         usersByID.set(user.id, user);
+        addedFollowings.push(user);
         if (usersByID.size > maximumTwitterFollowings) {
           throw twitterFollowingLimitError();
         }
       }
     }
+
+    yield {
+      page: pageNumber + 1,
+      fetchedCount: usersByID.size,
+      maximumCount: maximumTwitterFollowings,
+      followings: addedFollowings,
+    };
 
     if (!body.has_next_page) {
       return Array.from(usersByID.values());

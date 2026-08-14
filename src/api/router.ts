@@ -18,6 +18,7 @@ export const apiRouter = {
   invitations: invitationRouter,
   imports: {
     xFollowings: identityAvatarImportRouter.xFollowingImport,
+    xFollowingsStream: identityAvatarImportRouter.xFollowingImportStream,
   },
   internal: {
     catalog: catalogControlRouter,

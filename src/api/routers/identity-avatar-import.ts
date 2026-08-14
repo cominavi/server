@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { eventIterator } from "@orpc/server";
 import { z } from "zod";
 import { createDatabase } from "../../lib/db/client";
 import { users } from "../../lib/db/schema";
@@ -13,10 +14,14 @@ import {
   removeAvatar,
   replaceAvatar,
 } from "../../lib/server/avatars";
-import { importFollowingSnapshot } from "../../lib/server/following-import";
+import {
+  FollowingImportError,
+  importFollowingSnapshot,
+  streamFollowingSnapshot,
+} from "../../lib/server/following-import";
 import { ServiceError } from "../../lib/server/service-error";
 import type { UserProfile } from "../../lib/server/users";
-import { authenticatedProcedure } from "../core";
+import { authenticatedProcedure, expectedAPIError } from "../core";
 
 const canonicalRequestIDSchema = z.uuid();
 const isoDateSchema = z.iso.datetime();
@@ -111,6 +116,13 @@ const followingImportResponseSchema = z.object({
   nextAllowedAt: isoDateSchema,
   followings: z.array(followingSchema),
   source: z.enum(["twitterapi.io", "cache"]),
+});
+
+const followingImportProgressSchema = z.object({
+  page: z.number().int().min(1).max(25),
+  fetchedCount: z.number().int().min(0).max(5_000),
+  maximumCount: z.literal(5_000),
+  followings: z.array(followingSchema),
 });
 
 export const startCirclemsIdentityLink = authenticatedProcedure
@@ -294,6 +306,37 @@ export const importXFollowings = authenticatedProcedure
     importFollowingSnapshot(context.identity, input.userName, context.env),
   );
 
+export const streamXFollowings = authenticatedProcedure
+  .route({
+    method: "POST",
+    path: "/api/v2/imports/x-followings/stream",
+    operationId: "streamXFollowings",
+    summary: "Stream X following import progress",
+    description:
+      "Streams each fetched X following page with Server-Sent Events, then returns the same completed snapshot shape as the non-streaming import endpoint.",
+    tags: ["Imports"],
+  })
+  .input(z.object({ userName: z.string().min(1).max(64) }))
+  .output(
+    eventIterator(followingImportProgressSchema, followingImportResponseSchema),
+  )
+  .handler(async function* ({ context, input }) {
+    try {
+      return yield* streamFollowingSnapshot(
+        context.identity,
+        input.userName,
+        context.env,
+      );
+    } catch (error) {
+      // Middleware finishes before an async iterator is consumed, so translate
+      // deferred domain errors at the stream boundary as well.
+      if (error instanceof FollowingImportError) {
+        throw expectedAPIError(error);
+      }
+      throw error;
+    }
+  });
+
 export const identityAvatarImportRouter = {
   circlemsLink: {
     start: startCirclemsIdentityLink,
@@ -305,6 +348,7 @@ export const identityAvatarImportRouter = {
   },
   userAvatar: getUserAvatar,
   xFollowingImport: importXFollowings,
+  xFollowingImportStream: streamXFollowings,
 };
 
 function generatedUserProfile(

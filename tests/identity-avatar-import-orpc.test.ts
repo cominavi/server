@@ -243,6 +243,44 @@ test("v2 link, raw avatar, controlled download, deletion, and cached import reus
   });
   assert.equal(imported.status, 200);
   assert.deepEqual(await imported.json(), { ...snapshot, source: "cache" });
+
+  const streamed = await call("/api/v2/imports/x-followings/stream", {
+    method: "POST",
+    headers: {
+      Accept: "text/event-stream",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ userName: "@Circle_Owner" }),
+  });
+  assert.equal(streamed.status, 200);
+  assert.equal(streamed.headers.get("Content-Type"), "text/event-stream");
+  const streamedBody = await streamed.text();
+  assert.match(streamedBody, /event: done/);
+  assert.match(streamedBody, /"source":"cache"/);
+  assert.match(streamedBody, /"twitterUserName":"circle_owner"/);
+
+  const failedStream = await call("/api/v2/imports/x-followings/stream", {
+    method: "POST",
+    headers: {
+      Accept: "text/event-stream",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ userName: "/" }),
+  });
+  assert.equal(failedStream.status, 200);
+  assert.equal(failedStream.headers.get("Content-Type"), "text/event-stream");
+  const failedStreamBody = await failedStream.text();
+  assert.match(failedStreamBody, /event: error/);
+  const errorDataLine = failedStreamBody
+    .split("\n")
+    .find((line) => line.startsWith("data: "));
+  assert.ok(errorDataLine);
+  const errorPayload = JSON.parse(errorDataLine.slice("data: ".length)) as {
+    message: string;
+    data: { error: string };
+  };
+  assert.equal(errorPayload.message, "Enter a valid X username.");
+  assert.equal(errorPayload.data.error, "invalid_twitter_username");
 });
 
 function setup(): SQLiteD1Database {

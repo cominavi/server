@@ -249,7 +249,7 @@ export function documentBearerOperation<T extends object>(procedure: T): T {
   }));
 }
 
-function expectedAPIError(
+export function expectedAPIError(
   error: AuthenticationError | FollowingImportError | ServiceError,
 ): ORPCError<string, z.infer<typeof serviceErrorDataSchema>> {
   const code = errorCodeForStatus(error.status);
