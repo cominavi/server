@@ -1,4 +1,4 @@
-import type { CominaviIdentity } from "./cominavi-auth";
+import * as Sentry from "@sentry/cloudflare";
 import {
   and,
   asc,
@@ -17,6 +17,7 @@ import {
   followingSnapshotCleanup,
   users,
 } from "../db/schema";
+import type { CominaviIdentity } from "./cominavi-auth";
 import {
   fetchTwitterFollowings,
   normalizeTwitterUserName,
@@ -56,6 +57,7 @@ export interface FollowingImportResponse extends FollowingSnapshot {
 
 export interface FollowingImportHooks {
   afterSnapshotStored?: () => Promise<void>;
+  onServerError?: (error: FollowingImportError) => void;
 }
 
 export class FollowingImportError extends Error {
@@ -276,21 +278,28 @@ export async function importFollowingSnapshot(
              AND ${users.deletionPendingAt} IS NULL
          )`);
 
-    if (error instanceof FollowingImportError) throw error;
+    if (error instanceof FollowingImportError) {
+      reportServerError(error, hooks);
+      throw error;
+    }
     if (error instanceof TwitterFollowingError) {
-      throw new FollowingImportError(
+      const importError = new FollowingImportError(
         error.code,
         error.code === "twitter_following_limit_exceeded" ? 422 : 502,
         error.message,
         new Date(nextAllowedAt * 1_000).toISOString(),
       );
+      reportServerError(importError, hooks);
+      throw importError;
     }
-    throw new FollowingImportError(
+    const importError = new FollowingImportError(
       "import_failed",
       502,
       "The followings import failed.",
       new Date(nextAllowedAt * 1_000).toISOString(),
     );
+    reportServerError(importError, hooks);
+    throw importError;
   }
 }
 
@@ -564,6 +573,29 @@ function unavailableImport(): FollowingImportError {
     401,
     "The followings import is no longer authorized.",
   );
+}
+
+function reportServerError(
+  error: FollowingImportError,
+  hooks: FollowingImportHooks,
+): void {
+  if (error.status < 500) return;
+
+  hooks.onServerError?.(error);
+  Sentry.withScope((scope) => {
+    scope.setTag("cominavi.feature", "x-following-import");
+    scope.setTag("cominavi.error_code", error.code);
+    scope.setContext("x_following_import", {
+      provider: "twitterapi.io",
+      status: error.status,
+    });
+    Sentry.captureException(error, {
+      mechanism: {
+        handled: true,
+        type: "cominavi.x_following_import",
+      },
+    });
+  });
 }
 
 export function snapshotMatchesUserName(

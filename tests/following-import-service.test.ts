@@ -135,6 +135,77 @@ test("a failed account switch retains but never mislabels the prior snapshot", a
   );
 });
 
+test("reports upstream X import failures without reporting client errors", async () => {
+  const database = setup();
+  const snapshots = new FakeKV();
+  const bindings: FollowingImportBindings = {
+    COMINAVI_DB: database.binding,
+    COMINAVI_FOLLOWING_SNAPSHOTS: snapshots as unknown as KVNamespace,
+    TWITTERAPI_IO_API_KEY: "key",
+  };
+  const reported: FollowingImportError[] = [];
+
+  await assert.rejects(
+    importFollowingSnapshot(
+      identity,
+      "owner",
+      bindings,
+      1_000_000,
+      async () =>
+        Response.json({
+          status: "error",
+          message: "upstream failure",
+          followings: [],
+          has_next_page: false,
+        }),
+      {
+        onServerError: (error) => reported.push(error),
+      },
+    ),
+    (error: unknown) =>
+      error instanceof FollowingImportError &&
+      error.code === "twitter_api_error" &&
+      error.status === 502,
+  );
+  assert.deepEqual(
+    reported.map(({ code, status }) => ({ code, status })),
+    [{ code: "twitter_api_error", status: 502 }],
+  );
+
+  const limitDatabase = setup();
+  const limitSnapshots = new FakeKV();
+  const limitReported: FollowingImportError[] = [];
+  await assert.rejects(
+    importFollowingSnapshot(
+      identity,
+      "owner",
+      {
+        ...bindings,
+        COMINAVI_DB: limitDatabase.binding,
+        COMINAVI_FOLLOWING_SNAPSHOTS: limitSnapshots as unknown as KVNamespace,
+      },
+      1_000_000,
+      async () =>
+        Response.json({
+          status: "success",
+          followings: Array.from({ length: 5_001 }, (_, index) => ({
+            id: String(index),
+            userName: `circle_${index}`,
+          })),
+          has_next_page: false,
+        }),
+      {
+        onServerError: (error) => limitReported.push(error),
+      },
+    ),
+    (error: unknown) =>
+      error instanceof FollowingImportError &&
+      error.code === "twitter_following_limit_exceeded" &&
+      error.status === 422,
+  );
+  assert.deepEqual(limitReported, []);
+});
+
 test("returns a typed 422 error when the X following limit is exceeded", async () => {
   const database = setup();
   const snapshots = new FakeKV();
