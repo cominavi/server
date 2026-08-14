@@ -27,6 +27,7 @@ export const maximumTwitterFollowings = 5_000;
 
 const twitterFollowingPageSize = 200;
 const maximumPages = maximumTwitterFollowings / twitterFollowingPageSize;
+const twitterFollowingTimeoutMilliseconds = 10 * 60 * 1_000;
 const twitterFollowingLimitMessage =
   "This X account follows more than 5,000 people. ComiNavi can import up to 5,000 accounts.";
 
@@ -84,7 +85,7 @@ export async function fetchTwitterFollowings(
           Accept: "application/json",
           "X-API-Key": apiKey,
         },
-        signal: AbortSignal.timeout(30_000),
+        signal: AbortSignal.timeout(twitterFollowingTimeoutMilliseconds),
       });
     } catch {
       throw new TwitterFollowingError(
