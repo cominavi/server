@@ -38,7 +38,7 @@ test("the server accepts a literal Swift-authored named purchase request", async
   );
   assert.equal(
     createHash("sha256").update(Uint8Array.from(fixtureBytes)).digest("hex"),
-    "fd86cb1c540597b0d4608690e161e48cd18735da33803b3054353ca50fffb294",
+    "d01199ca89efc57f234e8c98c659bdf41601d1a9a6e2761f358a275d9cebf1e7",
   );
   const fixture = JSON.parse(fixtureBytes.toString("utf8")) as NamedNeedFixture;
   assert.equal(fixture.fixtureVersion, 1);
@@ -90,11 +90,11 @@ test("the server accepts a literal Swift-authored named purchase request", async
   const wcID = String(fixture.vector.operation.payload.wcID);
   assert.equal(
     validated.document.circles[wcID]?.needs[needID]?.itemName,
-    "新幹線のきっぷ",
+    "新刊セット",
   );
   assert.equal(
     validated.document.circles[wcID]?.needs[needID]?.unitPrice,
-    14_720,
+    2_000,
   );
 });
 

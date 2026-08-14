@@ -17,6 +17,7 @@
     "openapi:check": "tsx tools/generate-openapi.ts --output openapi/cominavi-openapi.json --check",
     "fixture:automerge": "tsx tools/generate-automerge-v1-fixture.ts --write",
     "seed:c108": "tsx tools/generate-realtime-seed.ts",
+    "shinagaki:prepare": "tsx tools/prepare-shinagaki-analysis-import.ts",
     "deploy": "pnpm build && pnpm sentry:sourcemaps && wrangler deploy",
     "preview": "astro preview",
     "astro": "astro",

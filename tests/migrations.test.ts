@@ -13,6 +13,7 @@ const migrations = [
   "migrations/0007_catalog_genres_all_days.sql",
   "migrations/0008_circle_tag_overlays.sql",
   "migrations/0009_crawler_realtime_snapshots.sql",
+  "migrations/0010_shinagaki_analysis.sql",
 ];
 
 test("provider-neutral migration preserves every existing user-dependent row in a D1 transaction", () => {
@@ -85,6 +86,7 @@ test("provider-neutral migration preserves every existing user-dependent row in 
   database.exec(readFileSync(migrations[6], "utf8"));
   database.exec(readFileSync(migrations[7], "utf8"));
   database.exec(readFileSync(migrations[8], "utf8"));
+  database.exec(readFileSync(migrations[9], "utf8"));
   database.exec("COMMIT");
 
   assert.deepEqual(
@@ -166,7 +168,9 @@ test("provider-neutral migration preserves every existing user-dependent row in 
            'circle_tag_overlay_heads',
            'circle_tag_overlay_publication_receipts',
            'crawler_snapshot_versions', 'crawler_snapshot_heads',
-           'crawler_snapshot_publication_receipts'
+           'crawler_snapshot_publication_receipts',
+           'shinagaki_analysis_versions', 'shinagaki_analysis_records',
+           'shinagaki_analysis_heads'
          ) ORDER BY name`,
         )
         .all() as Array<{ name: string }>
@@ -182,6 +186,9 @@ test("provider-neutral migration preserves every existing user-dependent row in 
       { name: "crawler_snapshot_publication_receipts" },
       { name: "crawler_snapshot_versions" },
       { name: "provider_credentials" },
+      { name: "shinagaki_analysis_heads" },
+      { name: "shinagaki_analysis_records" },
+      { name: "shinagaki_analysis_versions" },
     ],
   );
   assert.equal(

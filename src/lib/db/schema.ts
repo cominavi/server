@@ -5,13 +5,14 @@ import {
   index,
   integer,
   primaryKey,
+  real,
   sqliteTable,
   text,
   unique,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-// This schema mirrors the final D1 shape after migrations 0001-0009.
+// This schema mirrors the final D1 shape after migrations 0001-0010.
 // The checked-in SQL migrations remain deployment authority; this module
 // provides the typed query surface for Worker services.
 
@@ -755,6 +756,230 @@ export const crawlerSnapshotPublicationReceipts = sqliteTable(
     check(
       "crawler_snapshot_publication_receipts_check_6",
       sql.raw("json_valid(result_json)"),
+    ),
+  ],
+);
+
+export const shinagakiAnalysisVersions = sqliteTable(
+  "shinagaki_analysis_versions",
+  {
+    eventNumber: integer("event_number").notNull(),
+    revision: text("revision").notNull(),
+    schemaVersion: integer("schema_version").notNull(),
+    sourceArchiveSHA256: text("source_archive_sha256").notNull(),
+    sourceIndexSHA256: text("source_index_sha256").notNull(),
+    sourceSnapshotRevision: text("source_snapshot_revision").notNull(),
+    sourceSnapshotGeneration: integer("source_snapshot_generation").notNull(),
+    modelsJSON: text("models_json").notNull(),
+    modelCount: integer("model_count").notNull(),
+    recordCount: integer("record_count").notNull(),
+    completeCount: integer("complete_count").notNull(),
+    partialCount: integer("partial_count").notNull(),
+    insufficientCount: integer("insufficient_count").notNull(),
+    productCount: integer("product_count").notNull(),
+    offerCount: integer("offer_count").notNull(),
+    conflictRecordCount: integer("conflict_record_count").notNull(),
+    conflictCount: integer("conflict_count").notNull(),
+    resultJSONBytes: integer("result_json_bytes").notNull(),
+    importedAt: integer("imported_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.eventNumber, table.revision] }),
+    unique().on(table.eventNumber, table.sourceArchiveSHA256),
+    foreignKey({
+      columns: [table.eventNumber, table.sourceSnapshotRevision],
+      foreignColumns: [
+        crawlerSnapshotVersions.eventNumber,
+        crawlerSnapshotVersions.revision,
+      ],
+    }),
+    check(
+      "shinagaki_analysis_versions_check_1",
+      sql.raw("event_number > 0 AND event_number <= 10000"),
+    ),
+    check("shinagaki_analysis_versions_check_2", sql.raw("schema_version = 1")),
+    check(
+      "shinagaki_analysis_versions_check_3",
+      sql.raw("length(revision) = 64 AND revision NOT GLOB '*[^0-9a-f]*'"),
+    ),
+    check(
+      "shinagaki_analysis_versions_check_4",
+      sql.raw(
+        "length(source_archive_sha256) = 64 AND source_archive_sha256 NOT GLOB '*[^0-9a-f]*'",
+      ),
+    ),
+    check(
+      "shinagaki_analysis_versions_check_5",
+      sql.raw(
+        "length(source_index_sha256) = 64 AND source_index_sha256 NOT GLOB '*[^0-9a-f]*'",
+      ),
+    ),
+    check(
+      "shinagaki_analysis_versions_check_6",
+      sql.raw(
+        "length(source_snapshot_revision) = 64 AND source_snapshot_revision NOT GLOB '*[^0-9a-f]*'",
+      ),
+    ),
+    check(
+      "shinagaki_analysis_versions_check_7",
+      sql.raw("source_snapshot_generation > 0"),
+    ),
+    check(
+      "shinagaki_analysis_versions_check_8",
+      sql.raw("json_valid(models_json)"),
+    ),
+    check(
+      "shinagaki_analysis_versions_check_9",
+      sql.raw("model_count > 0 AND model_count <= 20"),
+    ),
+    check(
+      "shinagaki_analysis_versions_check_10",
+      sql.raw("record_count > 0 AND record_count <= 20000"),
+    ),
+    check(
+      "shinagaki_analysis_versions_check_11",
+      sql.raw(
+        "complete_count >= 0 AND partial_count >= 0 AND insufficient_count >= 0",
+      ),
+    ),
+    check(
+      "shinagaki_analysis_versions_check_12",
+      sql.raw(
+        "complete_count + partial_count + insufficient_count = record_count",
+      ),
+    ),
+    check(
+      "shinagaki_analysis_versions_check_13",
+      sql.raw("product_count >= 0 AND offer_count >= 0"),
+    ),
+    check(
+      "shinagaki_analysis_versions_check_14",
+      sql.raw(
+        "conflict_record_count >= 0 AND conflict_record_count <= record_count",
+      ),
+    ),
+    check(
+      "shinagaki_analysis_versions_check_15",
+      sql.raw("conflict_count >= conflict_record_count"),
+    ),
+    check(
+      "shinagaki_analysis_versions_check_16",
+      sql.raw("result_json_bytes > 0"),
+    ),
+  ],
+);
+
+export const shinagakiAnalysisRecords = sqliteTable(
+  "shinagaki_analysis_records",
+  {
+    eventNumber: integer("event_number").notNull(),
+    revision: text("revision").notNull(),
+    postID: text("post_id").notNull(),
+    wcID: integer("wc_id").notNull(),
+    authorHandle: text("author_handle").notNull(),
+    model: text("model").notNull(),
+    status: text("status", {
+      enum: ["complete", "partial", "insufficient"] as const,
+    }).notNull(),
+    overallConfidence: real("overall_confidence").notNull(),
+    productCount: integer("product_count").notNull(),
+    offerCount: integer("offer_count").notNull(),
+    conflictCount: integer("conflict_count").notNull(),
+    resultSHA256: text("result_sha256").notNull(),
+    resultJSON: text("result_json").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.eventNumber, table.revision, table.postID] }),
+    foreignKey({
+      columns: [table.eventNumber, table.revision],
+      foreignColumns: [
+        shinagakiAnalysisVersions.eventNumber,
+        shinagakiAnalysisVersions.revision,
+      ],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.eventNumber, table.wcID],
+      foreignColumns: [
+        catalogStableCircles.comiketNo,
+        catalogStableCircles.wcID,
+      ],
+    }),
+    index("shinagaki_analysis_records_circle").on(
+      table.eventNumber,
+      table.wcID,
+      table.revision,
+      table.postID,
+    ),
+    check(
+      "shinagaki_analysis_records_check_1",
+      sql.raw("event_number > 0 AND event_number <= 10000"),
+    ),
+    check(
+      "shinagaki_analysis_records_check_2",
+      sql.raw(
+        "length(post_id) BETWEEN 1 AND 24 AND post_id NOT GLOB '*[^0-9]*'",
+      ),
+    ),
+    check("shinagaki_analysis_records_check_3", sql.raw("wc_id > 0")),
+    check(
+      "shinagaki_analysis_records_check_4",
+      sql.raw(
+        "length(author_handle) BETWEEN 1 AND 15 AND author_handle NOT GLOB '*[^A-Za-z0-9_]*'",
+      ),
+    ),
+    check(
+      "shinagaki_analysis_records_check_5",
+      sql.raw("length(trim(model)) BETWEEN 1 AND 100"),
+    ),
+    check(
+      "shinagaki_analysis_records_check_6",
+      sql.raw("status IN ('complete', 'partial', 'insufficient')"),
+    ),
+    check(
+      "shinagaki_analysis_records_check_7",
+      sql.raw("overall_confidence >= 0.0 AND overall_confidence <= 1.0"),
+    ),
+    check(
+      "shinagaki_analysis_records_check_8",
+      sql.raw(
+        "product_count >= 0 AND offer_count >= 0 AND conflict_count >= 0",
+      ),
+    ),
+    check(
+      "shinagaki_analysis_records_check_9",
+      sql.raw(
+        "length(result_sha256) = 64 AND result_sha256 NOT GLOB '*[^0-9a-f]*'",
+      ),
+    ),
+    check(
+      "shinagaki_analysis_records_check_10",
+      sql.raw("json_valid(result_json)"),
+    ),
+  ],
+);
+
+export const shinagakiAnalysisHeads = sqliteTable(
+  "shinagaki_analysis_heads",
+  {
+    eventNumber: integer("event_number").primaryKey(),
+    revision: text("revision").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.eventNumber, table.revision],
+      foreignColumns: [
+        shinagakiAnalysisVersions.eventNumber,
+        shinagakiAnalysisVersions.revision,
+      ],
+    }),
+    check(
+      "shinagaki_analysis_heads_check_1",
+      sql.raw("event_number > 0 AND event_number <= 10000"),
+    ),
+    check(
+      "shinagaki_analysis_heads_check_2",
+      sql.raw("length(revision) = 64 AND revision NOT GLOB '*[^0-9a-f]*'"),
     ),
   ],
 );
@@ -2843,6 +3068,9 @@ export const migratedTables = {
   provider_credentials: providerCredentials,
   push_devices: pushDevices,
   seed_imports: seedImports,
+  shinagaki_analysis_heads: shinagakiAnalysisHeads,
+  shinagaki_analysis_records: shinagakiAnalysisRecords,
+  shinagaki_analysis_versions: shinagakiAnalysisVersions,
   shared_plan_event_recipients: sharedPlanEventRecipients,
   shared_plan_events: sharedPlanEvents,
   shared_plan_invitations: sharedPlanInvitations,
