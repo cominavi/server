@@ -116,7 +116,8 @@ test("a failed account switch retains but never mislabels the prior snapshot", a
     ),
     (error: unknown) =>
       error instanceof FollowingImportError &&
-      error.code === "twitter_api_error",
+      error.code === "twitter_api_error" &&
+      error.nextAllowedAt === undefined,
   );
 
   assert.equal(
@@ -136,7 +137,8 @@ test("a failed account switch retains but never mislabels the prior snapshot", a
     ),
     (error: unknown) =>
       error instanceof FollowingImportError &&
-      error.code === "twitter_api_error",
+      error.code === "twitter_api_error" &&
+      error.nextAllowedAt === undefined,
   );
   assert.equal(failureRequests, 2);
 });

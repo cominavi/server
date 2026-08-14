@@ -288,7 +288,6 @@ export async function importFollowingSnapshot(
         error.code,
         error.code === "twitter_following_limit_exceeded" ? 422 : 502,
         error.message,
-        new Date(nextAllowedAt * 1_000).toISOString(),
       );
       reportServerError(importError, hooks);
       throw importError;
@@ -297,7 +296,6 @@ export async function importFollowingSnapshot(
       "import_failed",
       502,
       "The followings import failed.",
-      new Date(nextAllowedAt * 1_000).toISOString(),
     );
     reportServerError(importError, hooks);
     throw importError;
