@@ -6,6 +6,7 @@ import {
   replaceFavoriteSnapshot,
 } from "../../lib/server/favorites";
 import { loadCirclemsFavoriteImportPage } from "../../lib/server/circlems-favorite-import";
+import { syncFavoritesToCirclems } from "../../lib/server/circlems-favorite-sync";
 import { authenticatedProcedure } from "../core";
 
 const eventNumberSchema = z.coerce.number().int().positive().max(10_000);
@@ -36,6 +37,16 @@ const circlemsFavoriteImportPageSchema = z.object({
     }),
   ),
   nextCursor: z.string().min(1).optional(),
+});
+
+const circlemsFavoriteSyncResultSchema = z.object({
+  eventNumber: eventNumberSchema,
+  revision: z.number().int().nonnegative(),
+  favoriteCount: z.number().int().nonnegative(),
+  addedCount: z.number().int().nonnegative(),
+  updatedCount: z.number().int().nonnegative(),
+  unchangedCount: z.number().int().nonnegative(),
+  skippedMemoOnlyCount: z.number().int().nonnegative(),
 });
 
 export const getFavoriteSnapshot = authenticatedProcedure
@@ -121,8 +132,30 @@ export const listCirclemsFavoriteImport = authenticatedProcedure
     };
   });
 
+export const syncCirclemsFavorites = authenticatedProcedure
+  .route({
+    method: "POST",
+    path: "/api/v2/me/circlems-favorites/{eventNumber}/sync",
+    operationId: "syncCirclemsFavorites",
+    summary: "Sync ComiNavi favorites to Circle.ms",
+    description:
+      "Adds or updates the current canonical ComiNavi favorites in the linked Circle.ms account without deleting unrelated provider favorites or overwriting provider memos.",
+    tags: ["Favorites"],
+    inputStructure: "detailed",
+  })
+  .input(z.object({ params: favoritePathSchema }))
+  .output(circlemsFavoriteSyncResultSchema)
+  .handler(({ context, input }) =>
+    syncFavoritesToCirclems(
+      context.env,
+      context.identity,
+      parseEventNumber(String(input.params.eventNumber)),
+    ),
+  );
+
 export const favoritesRouter = {
   get: getFavoriteSnapshot,
   replace: replaceFavoriteSnapshotOperation,
   circlemsImport: listCirclemsFavoriteImport,
+  circlemsSync: syncCirclemsFavorites,
 };

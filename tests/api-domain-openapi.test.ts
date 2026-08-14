@@ -17,6 +17,11 @@ const authenticatedOperations = [
     "get",
     "listCirclemsFavoriteImport",
   ],
+  [
+    "/api/v2/me/circlems-favorites/{eventNumber}/sync",
+    "post",
+    "syncCirclemsFavorites",
+  ],
   ["/api/v2/me/notifications", "get", "listNotifications"],
   ["/api/v2/me/notifications/{eventID}/read", "put", "markNotificationRead"],
 ] as const;
