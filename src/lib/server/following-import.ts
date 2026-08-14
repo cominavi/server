@@ -268,7 +268,8 @@ export async function importFollowingSnapshot(
         : "import_failed";
     await createDatabase(bindings.COMINAVI_DB).run(sql`
       UPDATE ${followingImports}
-       SET status = 'failed', last_error = ${code}
+       SET status = 'failed', lease_id = NULL, next_allowed_at = ${now},
+           last_error = ${code}
        WHERE subject = ${identity.subject} AND lease_id = ${leaseID}
          AND EXISTS (
            SELECT 1 FROM ${users}

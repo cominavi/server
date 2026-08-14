@@ -85,13 +85,16 @@ test("a failed account switch retains but never mislabels the prior snapshot", a
       followings: [{ id: "x-1", userName: "circle_a" }],
       has_next_page: false,
     });
-  const failure: typeof fetch = async () =>
-    Response.json({
+  let failureRequests = 0;
+  const failure: typeof fetch = async () => {
+    failureRequests += 1;
+    return Response.json({
       status: "error",
       message: "private account",
       followings: [],
       has_next_page: false,
     });
+  };
 
   await importFollowingSnapshot(
     identity,
@@ -122,6 +125,7 @@ test("a failed account switch retains but never mislabels the prior snapshot", a
     priorSnapshotKey,
   );
   assert.equal(snapshots.has(priorSnapshotKey), true);
+  assert.equal(failureRequests, 1);
   await assert.rejects(
     importFollowingSnapshot(
       identity,
@@ -131,8 +135,10 @@ test("a failed account switch retains but never mislabels the prior snapshot", a
       failure,
     ),
     (error: unknown) =>
-      error instanceof FollowingImportError && error.code === "import_cooldown",
+      error instanceof FollowingImportError &&
+      error.code === "twitter_api_error",
   );
+  assert.equal(failureRequests, 2);
 });
 
 test("reports upstream X import failures without reporting client errors", async () => {
