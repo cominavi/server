@@ -67,7 +67,7 @@ const eventSchema = z.object({
   eventKey: z.string().regex(/^[A-Za-z0-9._:-]{8,240}$/),
   sourceRevision: z.number().int().positive(),
   updateKind: z.string().regex(/^[a-z][a-z0-9_]{1,63}$/),
-  stateKind: z.enum(["shinagaki", "cover"]),
+  stateKind: z.enum(["attendance", "shinagaki", "cover"]),
   stateValue: z.string().min(1).max(500),
   confidence: z.enum(["high", "medium", "low", "unmatched"]),
   notifiable: z.literal(false),

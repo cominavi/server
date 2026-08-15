@@ -193,18 +193,24 @@ export async function parseCrawlerSnapshotPublication(
   const events = source.events.map(parseCrawlerSnapshotEvent);
   for (let index = 0; index < events.length; index += 1) {
     const event = events[index]!;
+    const isArtwork =
+      event.stateKind === "shinagaki" || event.stateKind === "cover";
+    const isAttendance = event.stateKind === "attendance";
     if (
-      (event.stateKind !== "shinagaki" && event.stateKind !== "cover") ||
-      event.stateValue !== event.post.id ||
+      (!isArtwork && !isAttendance) ||
+      (isArtwork && event.stateValue !== event.post.id) ||
+      (isAttendance &&
+        event.stateValue !== "absent" &&
+        event.stateValue !== "attending") ||
       event.notifiable ||
-      event.post.media.length === 0 ||
+      (isArtwork && event.post.media.length === 0) ||
       event.circles.some(
         (circle) => circle.comiketNo !== Number(source.eventNumber),
       ) ||
       (index > 0 && events[index - 1]!.eventKey >= event.eventKey)
     ) {
       throw invalidSnapshot(
-        "Snapshot events must be unique, canonical, non-notifying artwork states.",
+        "Snapshot events must be unique, canonical, non-notifying supported states.",
       );
     }
     for (

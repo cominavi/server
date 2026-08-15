@@ -38,7 +38,7 @@ test("snapshot revision matches the collector cross-language vector", async () =
     revision: "0".repeat(64),
     generation: 1,
     catalogPayloadSHA256: "a".repeat(64),
-    matchingPolicyRevision: "c108-shinagaki-placement-v3",
+    matchingPolicyRevision: "c108-shinagaki-placement-v5",
     observedAt: "2026-08-13T12:00:00+00:00",
     events: [
       {
@@ -90,11 +90,11 @@ test("snapshot revision matches the collector cross-language vector", async () =
   };
   assert.equal(
     await calculateCrawlerSnapshotRevision(snapshot),
-    "83026e64087f64fb1ec1236f940b747e389b9269e6e13e8ef3097cc3199e575e",
+    "3910756124c27b753beec9e2475c1c876c7bd47e868ba43c457cda7649a868db",
   );
 });
 
-test("snapshot publication preserves mixed-case handles and accepts RFC3339 offsets", async () => {
+test("snapshot publication accepts media-less attendance, mixed-case handles, and RFC3339 offsets", async () => {
   const database = setup();
   seedCatalog(database);
   const bucket = new MemoryBucket();
@@ -103,6 +103,12 @@ test("snapshot publication preserves mixed-case handles and accepts RFC3339 offs
   publication.snapshot.observedAt = "2026-08-15T03:00:00+00:00";
   publication.snapshot.events[0]!.post.occurredAt = "2026-08-15T03:00:00+00:00";
   publication.snapshot.events[0]!.post.author.handle = "Sent_Kurokawa";
+  publication.snapshot.events[0]!.eventKey =
+    "snapshot:108:2090000000000000001:attendance:v1";
+  publication.snapshot.events[0]!.updateKind = "attendance_absent";
+  publication.snapshot.events[0]!.stateKind = "attendance";
+  publication.snapshot.events[0]!.stateValue = "absent";
+  publication.snapshot.events[0]!.post.media = [];
   publication.snapshot.revision = await calculateCrawlerSnapshotRevision(
     publication.snapshot,
   );
@@ -301,6 +307,38 @@ test("snapshot revision, generation, canonical order, catalog and WCID fail clos
   const authenticated = auth(publication, "snapshot:c108:g1:validation");
   const { publishCrawlerSnapshot } =
     await import("../src/lib/server/crawler-snapshots");
+
+  const artworkWithoutMedia = structuredClone(publication);
+  artworkWithoutMedia.snapshot.events[0]!.post.media = [];
+  artworkWithoutMedia.snapshot.revision =
+    await calculateCrawlerSnapshotRevision(artworkWithoutMedia.snapshot);
+  await assert.rejects(
+    () =>
+      publishCrawlerSnapshot(
+        database.binding,
+        bucket.binding,
+        auth(artworkWithoutMedia, "snapshot:c108:g1:artwork-without-media"),
+      ),
+    (error: unknown) => hasCode(error, "invalid_crawler_snapshot"),
+  );
+
+  const artworkWithDifferentPostID = structuredClone(publication);
+  artworkWithDifferentPostID.snapshot.events[0]!.stateValue =
+    "2090000000000000002";
+  artworkWithDifferentPostID.snapshot.revision =
+    await calculateCrawlerSnapshotRevision(artworkWithDifferentPostID.snapshot);
+  await assert.rejects(
+    () =>
+      publishCrawlerSnapshot(
+        database.binding,
+        bucket.binding,
+        auth(
+          artworkWithDifferentPostID,
+          "snapshot:c108:g1:artwork-different-post-id",
+        ),
+      ),
+    (error: unknown) => hasCode(error, "invalid_crawler_snapshot"),
+  );
 
   const badDigest = structuredClone(publication);
   badDigest.snapshot.revision = "0".repeat(64);
