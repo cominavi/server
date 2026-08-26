@@ -18,6 +18,10 @@ import {
   maximumCrawlerSnapshotPublicationBytes,
 } from "../lib/server/crawler-snapshots";
 import { authenticateCatalogPublisherRequest } from "../lib/server/catalog-publisher-auth";
+import {
+  reviewDemoCatalogDatabase,
+  serveReviewDemoCatalogArtifact,
+} from "../lib/server/review-demo-catalog";
 import type {
   AuthenticatedCatalogPublisherRequest,
   AuthenticatedCrawlerRawRequest,
@@ -133,6 +137,30 @@ export function createHomepageApp(astroFetch: AstroFetch) {
       "X-Content-Type-Options": "nosniff",
     });
   });
+
+  app.on(
+    ["GET", "HEAD"],
+    "/api/v2/review-demo/catalogs/c104/v2/:database",
+    async (context) => {
+      const database = reviewDemoCatalogDatabase(context.req.param("database"));
+      if (!database) {
+        return context.json(
+          { error: "not_found", message: "The demo catalog was not found." },
+          404,
+          { "Cache-Control": "private, no-store" },
+        );
+      }
+      try {
+        return await serveReviewDemoCatalogArtifact(
+          context.req.raw,
+          context.env.COMINAVI_CATALOG_DOWNLOADS,
+          database,
+        );
+      } catch (error) {
+        return apiErrorResponse(error);
+      }
+    },
+  );
 
   app.post("/api/v2/internal/crawler/events", async (context) => {
     try {
