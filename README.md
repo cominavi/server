@@ -167,6 +167,25 @@ UUID. Google avatar bytes are validated and copied into immutable private R2
 objects during sign-in rather than proxied from the provider; replaced objects
 enter the durable D1 cleanup outbox and the scheduled Worker retries deletion.
 
+## Local server for the iOS app
+
+Debug and Staging iOS builds can target a local server with the launch argument
+`-cominavi-service-origin http://127.0.0.1:4380` (see `docs/local-service.md`
+in the iOS repository). To serve the signed-out first-launch data:
+
+```sh
+pnpm exec wrangler d1 migrations apply COMINAVI_DB --local
+pnpm exec wrangler d1 execute COMINAVI_DB --local --file seed/c108-realtime.sql
+pnpm dev --host 127.0.0.1 --port 4380
+```
+
+`pnpm dev` logs one line per API request. Astro moves to the next free port
+without failing when the requested one is taken, so check the port it prints.
+The seed provides the C108 realtime feed (`/api/v2/events/108/updates`).
+Signed-in endpoints need a ComiNavi session, which a local server cannot issue
+without real provider credentials in `.dev.vars`. Everything stays in the local
+Miniflare state under `.wrangler/`; never pass `--remote` for this.
+
 ## Commands
 
 | Command                  | Action                                                     |
