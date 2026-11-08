@@ -451,6 +451,19 @@ test("an image-only catalog rotation keeps an identical main-bound overlay usabl
     unknownAfterRotation.headers.get("Cache-Control"),
     "private, no-store",
   );
+  assert.equal(
+    unknownAfterRotation.headers.get("CDN-Cache-Control"),
+    "no-store",
+  );
+  assert.equal(
+    unknownAfterRotation.headers.get("Cloudflare-CDN-Cache-Control"),
+    "no-store",
+  );
+  assert.equal(
+    unknownAfterRotation.headers.get("Access-Control-Allow-Origin"),
+    "*",
+  );
+  assert.equal(unknownAfterRotation.headers.get("ETag"), null);
   seedCatalogCirclesTable(database);
   const unchanged = await app.fetch(
     new Request(`${url}?tagRevision=${overlay.revision}`),

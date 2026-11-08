@@ -2,7 +2,7 @@ import { z } from "zod";
 import { parseEventNumber } from "../../lib/server/favorites";
 import { loadRealtimeUpdates } from "../../lib/server/realtime-api";
 import { loadTagOverlay } from "../../lib/server/tag-overlays";
-import { publicProcedure } from "../core";
+import { publicProcedure, type ResponseCachePolicy } from "../core";
 import {
   circleTagOverlaySchema,
   tagOverlayRevisionSchema,
@@ -179,6 +179,11 @@ export const listRealtimeUpdates = publicProcedure
             eventNumber,
             input.query.tagRevision,
           );
+    if (context.responseMetadata) {
+      context.responseMetadata.cachePolicy = realtimeCachePolicy(
+        tagOverlayResult?.status,
+      );
+    }
     return {
       ...result,
       updates: (result.updates as RawRealtimeUpdate[]).map(normalizeUpdate),
@@ -190,6 +195,20 @@ export const listRealtimeUpdates = publicProcedure
         : { tagOverlay: tagOverlayResult.overlay }),
     };
   });
+
+/**
+ * A transient tag overlay outcome must not be cached: a retry may see the
+ * overlay become available or current.
+ */
+export function realtimeCachePolicy(
+  tagOverlayStatus:
+    "current" | "absent" | "invalidated" | "unavailable" | undefined,
+): ResponseCachePolicy {
+  return tagOverlayStatus === "invalidated" ||
+    tagOverlayStatus === "unavailable"
+    ? "no-store"
+    : "public-realtime";
+}
 
 export const realtimeUpdatesRouter = {
   list: listRealtimeUpdates,

@@ -5,7 +5,7 @@ import { logger } from "hono/logger";
 import type { Context } from "hono";
 import { generateOpenAPIDocument } from "./openapi";
 import { apiRouter } from "./router";
-import { canonicalErrorResponseBody } from "./core";
+import { canonicalErrorResponseBody, type ResponseMetadata } from "./core";
 import { apiErrorResponse } from "../lib/server/api-response";
 import { authenticateRequestWithBindings } from "../lib/server/authenticated-request-core";
 import { assertPlanMember } from "../lib/server/shared-plans";
@@ -353,15 +353,21 @@ async function handleOpenAPIRequest(
   },
   transportRequest: Request = context.req.raw,
 ): Promise<Response> {
+  const responseMetadata: ResponseMetadata = {};
   const result = await openAPIHandler.handle(transportRequest, {
     context: {
       request: context.req.raw,
       env: context.env,
+      responseMetadata,
       ...authenticated,
     },
   });
   if (result.matched) {
-    return withCanonicalJSONHeaders(result.response, context.req.raw);
+    return withCanonicalJSONHeaders(
+      result.response,
+      context.req.raw,
+      responseMetadata,
+    );
   }
   return context.json(
     { error: "not_found", message: "The API route was not found." },
@@ -426,6 +432,7 @@ function crawlerJSONTransportRequest(
 async function withCanonicalJSONHeaders(
   response: Response,
   request: Request,
+  responseMetadata: ResponseMetadata,
 ): Promise<Response> {
   if (!response.headers.get("Content-Type")?.toLowerCase().includes("json")) {
     return response;
@@ -434,9 +441,11 @@ async function withCanonicalJSONHeaders(
   headers.set("X-Content-Type-Options", "nosniff");
 
   const url = new URL(request.url);
+  const cachePolicy = responseMetadata.cachePolicy;
   if (
     request.method === "GET" &&
     response.status === 200 &&
+    cachePolicy !== undefined &&
     realtimeUpdatesPathPattern.test(url.pathname) &&
     isCacheableRealtimeUpdatesURL(url)
   ) {
@@ -446,12 +455,7 @@ async function withCanonicalJSONHeaders(
       "Access-Control-Expose-Headers",
       "Cache-Control, CDN-Cache-Control, ETag",
     );
-    const tagOverlayIsTransientOrUncacheable =
-      url.searchParams.has("tagRevision") &&
-      new TextDecoder()
-        .decode(body)
-        .match(/"tagOverlayStatus":"(?:invalidated|unavailable)"/) !== null;
-    if (tagOverlayIsTransientOrUncacheable) {
+    if (cachePolicy === "no-store") {
       headers.set("Cache-Control", "private, no-store");
       headers.set("CDN-Cache-Control", "no-store");
       headers.set("Cloudflare-CDN-Cache-Control", "no-store");
