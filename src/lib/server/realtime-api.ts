@@ -35,7 +35,7 @@ interface UpdateRow {
   mediaJSON: string;
 }
 
-const incrementalPageSize = 500;
+export const incrementalPageSize = 500;
 
 export async function loadRealtimeUpdates(
   database: D1Database,
@@ -245,7 +245,16 @@ async function loadRealtimeUpdatesAttempt(
         ),
         currentHeadTargetsJSON,
       ),
-      query(gt(circleUpdateEvents.id, publicationCursor)),
+      // A reset must stay one complete page for shipped clients, which reject
+      // resetRequired with hasMore. The baseline is complete; the delta tail
+      // after the publication cursor is capped at one incremental page. The
+      // client continues from the last returned cursor through the ordinary
+      // paged afterCursor feed. Query-free legacy requests stay complete.
+      resetRequired
+        ? query(gt(circleUpdateEvents.id, publicationCursor)).limit(
+            incrementalPageSize,
+          )
+        : query(gt(circleUpdateEvents.id, publicationCursor)),
     ]);
     const baseline = [
       ...(snapshot?.events ?? []).map((event) =>

@@ -11,6 +11,7 @@ import {
   type CrawlerRealtimeSnapshot,
 } from "../src/lib/server/crawler-snapshots";
 import { generateOpenAPIDocument } from "../src/api/openapi";
+import { incrementalPageSize } from "../src/lib/server/realtime-api";
 import { SQLiteD1Database } from "./sqlite-d1";
 
 const snapshotSecret = "snapshot-secret-is-independent-and-long-enough";
@@ -487,6 +488,164 @@ test("publication cursor fences concurrent append and reset keeps non-artwork st
   assert.equal(
     incrementalBody.updates[0]?.eventKey,
     "state:presence:after-publication",
+  );
+});
+
+test("a reset caps its post-publication delta tail at one page and stays a single page", async () => {
+  const database = setup();
+  seedCatalog(database);
+  seedLegacyUpdates(database);
+  const bucket = new MemoryBucket();
+  const publication = await fixturePublication();
+  const { publishCrawlerSnapshot } =
+    await import("../src/lib/server/crawler-snapshots");
+  const published = await publishCrawlerSnapshot(
+    database.binding,
+    bucket.binding,
+    auth(publication, "snapshot:c108:g1:bounded-reset"),
+  );
+  const tail = incrementalPageSize + 2;
+  seedPostPublicationPresenceRun(database, published.publicationCursor, tail);
+
+  const app = createHomepageApp(() => new Response("astro"));
+  const fetchUpdates = async (query: string) => {
+    const response = await app.fetch(
+      new Request(`https://cominavi.net/api/v2/events/108/updates${query}`),
+      environment(database, bucket),
+      executionContext,
+    );
+    assert.equal(response.status, 200);
+    return response.json<{
+      hasMore: boolean;
+      resetRequired: boolean;
+      publicationCursor: number;
+      updates: Array<{ eventKey: string; cursor: number }>;
+    }>();
+  };
+
+  const reset = await fetchUpdates("?afterCursor=0&publicationRevision=none");
+  assert.equal(reset.resetRequired, true);
+  assert.equal(reset.hasMore, false);
+  const baseline = reset.updates.filter(
+    (update) => update.cursor === published.publicationCursor,
+  );
+  const deltas = reset.updates.filter(
+    (update) => update.cursor > published.publicationCursor,
+  );
+  assert.ok(baseline.length > 0);
+  assert.equal(deltas.length, incrementalPageSize);
+  assert.equal(baseline.length + deltas.length, reset.updates.length);
+  const lastCursor = deltas.at(-1)!.cursor;
+  assert.equal(lastCursor, published.publicationCursor + incrementalPageSize);
+
+  const rest = await fetchUpdates(
+    `?afterCursor=${lastCursor}&publicationRevision=${published.revision}`,
+  );
+  assert.equal(rest.resetRequired, false);
+  assert.equal(rest.hasMore, false);
+  assert.deepEqual(
+    rest.updates.map((update) => update.cursor),
+    [lastCursor + 1, lastCursor + 2],
+  );
+
+  const legacy = await fetchUpdates("");
+  assert.equal(legacy.hasMore, false);
+  assert.equal(
+    legacy.updates.filter(
+      (update) => update.cursor > published.publicationCursor,
+    ).length,
+    tail,
+  );
+});
+
+test("a client that follows only the afterCursor feed converges after a capped reset", async () => {
+  const database = setup();
+  seedCatalog(database);
+  seedLegacyUpdates(database);
+  const bucket = new MemoryBucket();
+  const publication = await fixturePublication();
+  const { publishCrawlerSnapshot } =
+    await import("../src/lib/server/crawler-snapshots");
+  const published = await publishCrawlerSnapshot(
+    database.binding,
+    bucket.binding,
+    auth(publication, "snapshot:c108:g1:converging-reset"),
+  );
+  // More than two incremental pages after the reset page.
+  const tail = incrementalPageSize * 3 + 3;
+  seedPostPublicationPresenceRun(database, published.publicationCursor, tail);
+
+  const app = createHomepageApp(() => new Response("astro"));
+  type Update = { eventKey: string; cursor: number };
+  type Page = {
+    hasMore: boolean;
+    resetRequired: boolean;
+    publicationRevision: string;
+    publicationCursor: number;
+    updates: Update[];
+  };
+  const fetchPage = async (query: string): Promise<Page> => {
+    const response = await app.fetch(
+      new Request(`https://cominavi.net/api/v2/events/108/updates${query}`),
+      environment(database, bucket),
+      executionContext,
+    );
+    assert.equal(response.status, 200);
+    return response.json<Page>();
+  };
+
+  // Client: the shipped protocol only. A reset page replaces state and must
+  // not have hasMore; every later page continues from the last cursor.
+  let revision = "none";
+  let cursor = 0;
+  let state = new Map<string, Update>();
+  let requests = 0;
+  for (let revalidation = 0; revalidation < 10; revalidation += 1) {
+    let page: Page;
+    do {
+      page = await fetchPage(
+        `?afterCursor=${cursor}&publicationRevision=${revision}`,
+      );
+      requests += 1;
+      if (page.resetRequired) {
+        assert.equal(page.hasMore, false);
+        assert.ok(
+          page.updates.every(
+            (update) => update.cursor >= page.publicationCursor,
+          ),
+        );
+        state = new Map();
+        revision = page.publicationRevision;
+        cursor = page.publicationCursor;
+      } else {
+        assert.equal(page.publicationRevision, revision);
+        assert.ok(page.updates.every((update) => update.cursor > cursor));
+      }
+      for (const update of page.updates) state.set(update.eventKey, update);
+      cursor = page.updates.at(-1)?.cursor ?? cursor;
+    } while (page.hasMore);
+    if (page.updates.length === 0) break;
+  }
+
+  // Reference: the uncapped query-free representation of the same feed.
+  const reference = await fetchPage("");
+  assert.equal(reference.hasMore, false);
+  assert.equal(
+    reference.updates.filter(
+      (update) => update.cursor > published.publicationCursor,
+    ).length,
+    tail,
+  );
+  assert.deepEqual(
+    state,
+    new Map(reference.updates.map((update) => [update.eventKey, update])),
+  );
+  assert.equal(cursor, published.publicationCursor + tail);
+  // One capped reset page, then the paged feed: ceil((tail - 500) / 500)
+  // pages in the second revalidation plus a final empty check.
+  assert.equal(
+    requests,
+    1 + Math.ceil((tail - incrementalPageSize) / incrementalPageSize) + 1,
   );
 });
 
@@ -1324,6 +1483,32 @@ function seedConcurrentInventory(database: SQLiteD1Database): void {
       1, 'state:inventory:concurrent', 3, 1
     );
   `);
+}
+
+function seedPostPublicationPresenceRun(
+  database: SQLiteD1Database,
+  afterID: number,
+  count: number,
+): void {
+  const statements: string[] = [];
+  for (let index = 1; index <= count; index += 1) {
+    const id = afterID + index;
+    const postID = String(2_091_000_000_000_000_000n + BigInt(id));
+    statements.push(`
+      INSERT INTO social_posts (
+        post_id, author_handle, text, occurred_at, latest_observed_at, raw_post_json
+      ) VALUES ('${postID}', 'circle101', 'present', ${1786763000 + id}, ${1786763000 + id}, '{}');
+      INSERT INTO circle_update_events (
+        id, event_key, ingest_batch_id, source, source_revision, post_id,
+        update_kind, state_kind, state_value, confidence, occurred_at,
+        notifiable, evidence_json, created_at
+      ) VALUES (${id}, 'state:presence:run:${id}', 2, 'cominavi-collector', 1,
+        '${postID}', 'presence_present', 'presence', 'present',
+        'high', ${1786763000 + id}, 1, '{}', 1);
+      INSERT INTO circle_update_targets VALUES (${id}, 108, 101);
+    `);
+  }
+  database.native.exec(statements.join("\n"));
 }
 
 function seedPostPublicationPresence(database: SQLiteD1Database): void {
