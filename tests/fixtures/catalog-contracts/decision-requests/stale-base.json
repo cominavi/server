@@ -1,0 +1,87 @@
+{
+  "description": "A write against an old slot revision conflicts and exposes the current revision; a rebased write succeeds.",
+  "steps": [
+    {
+      "request": {
+        "requestID": "0b9e2c4a-6f1d-4c3e-9a57-2d8f1e6b3c01",
+        "subject": {
+          "catalogEventKey": "comiket-108",
+          "circleKey": "10000003"
+        },
+        "slot": "attendance",
+        "operation": "assert",
+        "decisionType": "attendance_assert",
+        "payloadSchemaVersion": 1,
+        "payload": {
+          "status": "withdrawn",
+          "day": 2
+        },
+        "baseRevision": 0,
+        "reason": {
+          "code": "operator_observed",
+          "text": "Circle posted a cancellation on X.",
+          "evidenceRefs": [
+            "x_post:1234567890"
+          ]
+        }
+      },
+      "requestSHA256": "a7948eab290faa945097e42807d95556a1c6b1eacba471afdda4493379c67887",
+      "expect": {
+        "status": 201,
+        "slotRevision": 1
+      }
+    },
+    {
+      "request": {
+        "requestID": "5a1f7d3e-2b8c-4e6a-8d09-7c3b1a2e4f02",
+        "subject": {
+          "catalogEventKey": "comiket-108",
+          "circleKey": "10000003"
+        },
+        "slot": "attendance",
+        "operation": "reverse",
+        "decisionType": "attendance_assert",
+        "payloadSchemaVersion": 1,
+        "payload": {},
+        "baseRevision": 0,
+        "reason": {
+          "code": "other",
+          "text": "Cancellation post was later deleted.",
+          "evidenceRefs": []
+        }
+      },
+      "requestSHA256": "53a7c8a0cfd34439b6949bd2c1e03c8b8f2e7eddf9e3e17a067aca5e4879b18d",
+      "expect": {
+        "status": 409,
+        "error": "stale_base_revision",
+        "currentRevision": 1
+      }
+    },
+    {
+      "request": {
+        "requestID": "9c4e1b7a-3d2f-4a8e-b6c5-1e0d9f8a7b03",
+        "subject": {
+          "catalogEventKey": "comiket-108",
+          "circleKey": "10000003"
+        },
+        "slot": "attendance",
+        "operation": "reverse",
+        "decisionType": "attendance_assert",
+        "payloadSchemaVersion": 1,
+        "payload": {},
+        "baseRevision": 1,
+        "reason": {
+          "code": "other",
+          "text": "Cancellation post was later deleted.",
+          "evidenceRefs": []
+        }
+      },
+      "requestSHA256": "62fdd17ac45057364c11e863fcce97a004e9a9d9dd4a1e1c0f4039824c906d07",
+      "expect": {
+        "status": 201,
+        "slotRevision": 2,
+        "activeDecision": null
+      }
+    }
+  ]
+}
