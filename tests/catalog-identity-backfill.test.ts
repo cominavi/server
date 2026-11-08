@@ -464,3 +464,91 @@ test("collision: a WCID alias points at another circle key", async () => {
   `);
   await assertCollision(db, "circle_alias_conflict");
 });
+
+test("a publication between chunks that advances already-copied circles is reconciled", async () => {
+  const db = database();
+  seedComiket(db, {
+    comiketNo: 108,
+    providerEventID: 230,
+    versionID: "c108-v1-0123456789abcdef01234567",
+    dates: ["2026-08-15"],
+    wcIDs: [1, 2, 3, 4],
+    publishedAt: 100,
+  });
+  await runCatalogIdentityBackfill(db.binding, {
+    now: 1,
+    chunkSize: 2,
+    maxChunks: 1,
+  });
+  db.native.exec(`
+    INSERT INTO catalog_versions (id, comiket_no, schema_version, state, claim_id,
+      source_main_sha256, source_image_sha256, created_at, published_at)
+    VALUES ('c108-v1-222222222222222222222222', 108, 1, 'published', 'claim-2',
+      '${"5".repeat(64)}', '${"6".repeat(64)}', 2, 200);
+    UPDATE catalog_stable_circles
+       SET last_version_id = 'c108-v1-222222222222222222222222', last_published_at = 200;
+  `);
+  await runToCompletion(db, 2, { chunkSize: 2 });
+  await runToCompletion(db, 3, { chunkSize: 2 });
+  assert.deepEqual(
+    db.rows(
+      "SELECT DISTINCT last_version_id, last_published_at FROM catalog_edition_circles",
+    ),
+    [
+      {
+        last_version_id: "c108-v1-222222222222222222222222",
+        last_published_at: 200,
+      },
+    ],
+  );
+});
+
+test("collision: two legacy events share one provider event ID", async () => {
+  const db = database();
+  seedComiket(db, {
+    comiketNo: 108,
+    providerEventID: 230,
+    versionID: "c108-v1-0123456789abcdef01234567",
+    dates: ["2026-08-15"],
+    wcIDs: [1],
+  });
+  seedComiket(db, {
+    comiketNo: 109,
+    providerEventID: 230,
+    versionID: "c109-v1-fedcba9876543210fedcba98",
+    dates: ["2026-12-30"],
+    wcIDs: [2],
+  });
+  await assertCollision(db, "event_alias_conflict");
+});
+
+test("collision: a disagreeing WCID alias racing the chunk batch rolls it back", async () => {
+  const db = seededForCollision();
+  await runCatalogIdentityBackfill(db.binding, { now: 100, maxChunks: 0 });
+  // Skip the edition batch; race the first circle chunk batch.
+  db.beforeNextBatch = () => {
+    db.beforeNextBatch = () => {
+      db.native.exec(`
+        INSERT INTO catalog_provider_aliases VALUES
+          ('circlems', 'production', 'wcid', 'comiket-108', '777', 'comiket-108', '778', 1, NULL);
+      `);
+    };
+  };
+  await assert.rejects(
+    runCatalogIdentityBackfill(db.binding, { now: 101 }),
+    (error: unknown) =>
+      error instanceof CatalogIdentityCollision &&
+      error.kind === "circle_key_conflict",
+  );
+  assert.equal(
+    db.rows("SELECT count(*) AS n FROM catalog_edition_circles")[0].n,
+    0,
+  );
+  assert.equal(
+    db.rows(
+      `SELECT count(*) AS n FROM catalog_identity_backfill_checkpoints WHERE step = 'circles:comiket-108'`,
+    )[0].n,
+    0,
+  );
+  await assertCollision(db, "circle_alias_conflict");
+});

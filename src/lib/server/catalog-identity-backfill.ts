@@ -85,12 +85,25 @@ export async function runCatalogIdentityBackfill(
     .orderBy(asc(catalogEvents.comiketNo));
 
   // Check every edition before writing any, so a collision writes nothing.
+  const providerEventOwners = new Map<number, number>();
+  for (const event of events) {
+    if (event.providerEventID === null) continue;
+    const owner = providerEventOwners.get(event.providerEventID);
+    if (owner !== undefined)
+      throw new CatalogIdentityCollision("event_alias_conflict", {
+        providerEventID: String(event.providerEventID),
+        comiketNo: event.comiketNo,
+        otherComiketNo: owner,
+      });
+    providerEventOwners.set(event.providerEventID, event.comiketNo);
+  }
   const plans = [];
   for (const event of events)
     plans.push(await planEdition(db, event, options.now));
   for (const plan of plans)
-    if (plan.statements.length > 0)
-      await runBatch(db, plan.statements, { catalogEventKey: plan.key });
+    await runBatch(db, plan.statements, "event_alias_conflict", {
+      catalogEventKey: plan.key,
+    });
   await saveCheckpoint(db, editionsStep, events.at(-1)?.comiketNo, options.now);
 
   const result: CatalogIdentityBackfillResult = {
@@ -314,6 +327,33 @@ async function planEdition(
       );
   }
 
+  // In-batch assertion: if this edition (and its provider event alias) is
+  // not exactly what the legacy authority implies once the writes above have
+  // applied, insert a row that violates the catalog_editions key CHECK so
+  // the whole batch rolls back. ON CONFLICT DO NOTHING above keeps identical
+  // concurrent runs idempotent; this guard keeps disagreeing ones fatal.
+  const aliasValue =
+    event.providerEventID === null ? null : String(event.providerEventID);
+  statements.push(
+    db.insert(catalogEditions).select(sql`
+      SELECT '', 'comiket', NULL, 1, '{}', 1, 'circlems', 'hidden', 0, 0
+      WHERE NOT EXISTS (
+          SELECT 1 FROM catalog_editions
+          WHERE catalog_event_key = ${key} AND series_key = 'comiket'
+            AND legacy_comiket_no = ${event.comiketNo}
+            AND source_provider = 'circlems')
+        OR (${aliasValue} IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM catalog_provider_aliases
+          WHERE provider = 'circlems' AND provider_environment = 'production'
+            AND alias_kind = 'circlems_event_id' AND alias_scope = ''
+            AND alias_value = ${aliasValue} AND catalog_event_key = ${key}
+            AND circle_key IS NULL AND retired_at IS NULL))
+        OR EXISTS (
+          SELECT 1 FROM catalog_provider_aliases
+          WHERE provider = 'circlems' AND provider_environment = 'production'
+            AND alias_kind = 'circlems_event_id' AND catalog_event_key = ${key}
+            AND retired_at IS NULL AND alias_value IS NOT ${aliasValue})`),
+  );
   return { key, statements };
 }
 
@@ -399,8 +439,20 @@ async function backfillCircles(
                 ${rangeFilter}`,
           )
           .onConflictDoNothing(),
+        // In-batch assertion: every stable circle in the range must now have
+        // its exact edition circle and live WCID alias, or a row violating
+        // the circle_key CHECK aborts the batch (and its checkpoint).
+        db.insert(catalogEditionCircles).select(sql`
+          SELECT ${key}, '', NULL, 'provider_durable', first_version_id,
+                 last_version_id, 0, 0
+          FROM catalog_stable_circles AS stable
+          WHERE stable.comiket_no = ${comiketNo}
+            AND stable.wc_id > ${from} AND stable.wc_id <= ${to}
+            AND ${circleMismatch(key)}
+          LIMIT 1`),
         checkpointUpsert(db, step, String(to), now, finished),
       ],
+      "circle_key_conflict",
       { catalogEventKey: key, fromWCID: from, toWCID: to },
     );
     chunks += 1;
@@ -497,37 +549,51 @@ async function assertCircleRangeConsistent(
     });
 }
 
-/** A completed circle step still matches the append-only legacy authority. */
+/**
+ * True when the stable circle `stable` (an alias of catalog_stable_circles)
+ * lacks its exact edition circle or its exact live WCID alias.
+ */
+function circleMismatch(key: string) {
+  return sql`(NOT EXISTS (
+      SELECT 1 FROM catalog_edition_circles AS edition
+      WHERE edition.catalog_event_key = ${key}
+        AND edition.circle_key = CAST(stable.wc_id AS TEXT)
+        AND edition.legacy_wc_id = stable.wc_id
+        AND edition.key_origin = 'provider_durable'
+        AND edition.first_version_id = stable.first_version_id
+        AND edition.last_version_id = stable.last_version_id
+        AND edition.first_published_at = stable.first_published_at
+        AND edition.last_published_at = stable.last_published_at)
+    OR NOT EXISTS (
+      SELECT 1 FROM catalog_provider_aliases AS alias
+      WHERE alias.provider = 'circlems' AND alias.provider_environment = 'production'
+        AND alias.alias_kind = 'wcid' AND alias.alias_scope = ${key}
+        AND alias.alias_value = CAST(stable.wc_id AS TEXT)
+        AND alias.catalog_event_key = ${key}
+        AND alias.circle_key = CAST(stable.wc_id AS TEXT)
+        AND alias.retired_at IS NULL))`;
+}
+
+/**
+ * A completed circle step still matches the append-only legacy authority
+ * row for row: every stable circle has its exact edition circle and alias,
+ * and the edition has no extra circles.
+ */
 async function circlesReconciled(
   db: CominaviDatabase,
   comiketNo: number,
   key: string,
 ): Promise<boolean> {
-  const [legacy] = await db
+  const [row] = await db
     .select({
-      count: sql<number>`count(*)`,
-      lastPublishedAt: sql<
-        number | null
-      >`max(${catalogStableCircles.lastPublishedAt})`,
-      lastWCID: sql<number | null>`max(${catalogStableCircles.wcID})`,
+      legacy: sql<number>`(SELECT count(*) FROM catalog_stable_circles WHERE comiket_no = ${comiketNo})`,
+      neutral: sql<number>`(SELECT count(*) FROM catalog_edition_circles WHERE catalog_event_key = ${key})`,
+      mismatch: sql<number>`EXISTS (
+        SELECT 1 FROM catalog_stable_circles AS stable
+        WHERE stable.comiket_no = ${comiketNo} AND ${circleMismatch(key)})`,
     })
-    .from(catalogStableCircles)
-    .where(eq(catalogStableCircles.comiketNo, comiketNo));
-  const [neutral] = await db
-    .select({
-      count: sql<number>`count(*)`,
-      lastPublishedAt: sql<
-        number | null
-      >`max(${catalogEditionCircles.lastPublishedAt})`,
-      lastWCID: sql<number | null>`max(${catalogEditionCircles.legacyWCID})`,
-    })
-    .from(catalogEditionCircles)
-    .where(eq(catalogEditionCircles.catalogEventKey, key));
-  return (
-    legacy.count === neutral.count &&
-    legacy.lastPublishedAt === neutral.lastPublishedAt &&
-    legacy.lastWCID === neutral.lastWCID
-  );
+    .from(sql`(SELECT 1)`);
+  return row.legacy === row.neutral && row.mismatch === 0;
 }
 
 function checkpointUpsert(
@@ -566,6 +632,7 @@ async function saveCheckpoint(
 async function runBatch(
   db: CominaviDatabase,
   statements: BatchItem<"sqlite">[],
+  collisionKind: CatalogIdentityCollisionKind,
   context: Record<string, string | number | null>,
 ): Promise<void> {
   try {
@@ -579,12 +646,10 @@ async function runBatch(
       error instanceof Error &&
       /UNIQUE|PRIMARY KEY|CHECK|FOREIGN KEY/i.test(error.message)
     )
-      throw new CatalogIdentityCollision(
-        context.fromWCID === undefined
-          ? "edition_key_taken"
-          : "circle_key_conflict",
-        { ...context, constraint: error.message.slice(0, 200) },
-      );
+      throw new CatalogIdentityCollision(collisionKind, {
+        ...context,
+        constraint: error.message.slice(0, 200),
+      });
     throw error;
   }
 }
