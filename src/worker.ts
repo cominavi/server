@@ -6,6 +6,7 @@ import {
 } from "./lib/server/push-queue";
 import { processPendingAvatarCleanup } from "./lib/server/avatar-cleanup";
 import { discoverCatalogRefreshJobs } from "./lib/server/catalog-refresh";
+import { processCatalogIdentityBackfill } from "./lib/server/catalog-identity-backfill";
 import { processProviderAvatarImports } from "./lib/server/provider-avatar-import";
 import { processAccountDeletionJobs } from "./lib/server/account-deletion";
 import { processAppleRevocations } from "./lib/server/apple-auth-flow";
@@ -69,6 +70,7 @@ export default {
           env.COMINAVI_PROVIDER_CREDENTIAL_KEY_V1,
         ),
         discoverCatalogRefreshJobs(env),
+        processCatalogIdentityBackfill(env.COMINAVI_DB),
       ]).then(() => undefined),
     );
   },
