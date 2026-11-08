@@ -2315,6 +2315,29 @@ export const userIdentities = sqliteTable(
   ],
 );
 
+export const testIdentities = sqliteTable(
+  "test_identities",
+  {
+    label: text("label").primaryKey(),
+    userID: integer("user_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+    lastAuthenticatedAt: integer("last_authenticated_at").notNull(),
+  },
+  (table) => [
+    unique().on(table.userID),
+    foreignKey({
+      columns: [table.userID],
+      foreignColumns: [users.id],
+    }).onDelete("cascade"),
+    check(
+      "test_identities_check_1",
+      sql.raw(
+        "length(label) BETWEEN 1 AND 64 AND label NOT GLOB '*[^a-z0-9-]*'\n    AND substr(label, 1, 1) GLOB '[a-z0-9]'",
+      ),
+    ),
+  ],
+);
+
 export const appleAuthReceipts = sqliteTable(
   "apple_auth_receipts",
   {
@@ -3480,6 +3503,7 @@ export const migratedTables = {
   shared_plans: sharedPlans,
   social_posts: socialPosts,
   user_favorites: userFavorites,
+  test_identities: testIdentities,
   user_identities: userIdentities,
   users: users,
 } as const;

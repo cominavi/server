@@ -105,6 +105,15 @@ openssl rand 32 | base64 | tr '+/' '-_' | tr -d '=\n' |
   npx wrangler secret put COMINAVI_PROVIDER_CREDENTIAL_KEY_V1 -c wrangler.jsonc --env staging
 ```
 
+The test identity provider (below) needs its own secret. Generate it, store
+the value only in the operator's credentials store (`credentials.yaml`), and
+hand agents the path, never the value:
+
+```sh
+openssl rand -base64 48 | tr -d '\n' |
+  npx wrangler secret put COMINAVI_TEST_IDENTITY_SECRET -c wrangler.jsonc --env staging
+```
+
 Optional, only if staging should offer these features:
 
 - Circle.ms sandbox OAuth: `COMINAVI_OAUTH_CIRCLEMS_SANDBOX_CLIENT_ID`,
@@ -130,6 +139,39 @@ pnpm deploy:staging
 The custom-domain route creates the `staging.cominavi.net` record in the
 `cominavi.net` zone on first deploy. Check it with
 `curl -sI https://staging.cominavi.net/api/openapi.json`.
+
+## Test identity provider
+
+Agents, simulators, and CI sign in to staging or local dev without any
+third-party OAuth:
+
+```sh
+curl -sS -X POST https://staging.cominavi.net/api/v2/auth/test/session \
+  -H 'Content-Type: application/json' \
+  -H "X-ComiNavi-Test-Identity-Secret: $COMINAVI_TEST_IDENTITY_SECRET" \
+  -d '{"label":"agent-1"}'
+```
+
+- `label` (`^[a-z0-9][a-z0-9-]{0,63}$`) names one stable ComiNavi user; the
+  first call creates it (display name `Test <label>`, or `displayName` if
+  given). The label lives in the additive `test_identities` table, not in
+  `user_identities`, whose production provider CHECK is unchanged.
+- The response is the same session object as every other provider
+  (`tokenType`, `authVersion`, `accessToken`, `refreshToken`, `user`). Refresh,
+  logout, and account deletion work as usual. A login is refused while the
+  user is deletion-fenced and within the second of a logout fence. A lost
+  response is recovered by calling again, which creates a new refresh
+  family.
+- Test users have no `user_identities` rows, so `user.identities` is empty.
+- Guards: the route is compiled only into staging builds
+  (`CLOUDFLARE_ENV=staging`) and `astro dev`; production builds drop it. At
+  runtime it answers only when `ENVIRONMENT` is exactly `staging` or
+  `development` and `COMINAVI_TEST_IDENTITY_SECRET` (32+ characters) matches.
+  Otherwise it returns the same `404` as an unknown API route.
+
+Local dev: add `ENVIRONMENT=development` and a `COMINAVI_TEST_IDENTITY_SECRET`
+to `.dev.vars` (the top-level config says `production`, and `.dev.vars`
+overrides it for `pnpm dev` only).
 
 ## Known production-pinned values
 

@@ -23,6 +23,7 @@ import {
   reviewDemoCatalogDatabase,
   serveReviewDemoCatalogArtifact,
 } from "../lib/server/review-demo-catalog";
+import { registerTestIdentityProvider } from "../lib/server/test-identity-provider";
 import type {
   AuthenticatedCatalogPublisherRequest,
   AuthenticatedCrawlerRawRequest,
@@ -50,6 +51,9 @@ export const sentrySensitiveCrawlerRequestHeaders = [
   "x-cominavi-signature",
   "x-cominavi-timestamp",
   "idempotency-key",
+  // Not a crawler header, but the same kind of reusable shared credential:
+  // the staging/dev test identity provider's secret.
+  "x-cominavi-test-identity-secret",
 ] as const;
 
 const sentrySensitiveCrawlerRequestHeaderSet = new Set<string>(
@@ -136,6 +140,16 @@ export function createHomepageApp(astroFetch: AstroFetch) {
   // and plain Node tests (no Vite env) skip it.
   if (import.meta.env?.DEV) {
     app.use(logger());
+  }
+
+  // Staging and `astro dev` builds only. Production builds define the flag as
+  // `false`, so this branch and the provider module are dropped from the
+  // bundle; plain Node tests opt in by setting the global themselves.
+  if (
+    typeof __COMINAVI_TEST_IDENTITY_PROVIDER__ !== "undefined" &&
+    __COMINAVI_TEST_IDENTITY_PROVIDER__ === true
+  ) {
+    registerTestIdentityProvider(app);
   }
 
   app.get("/api/openapi.json", async (context) => {

@@ -1,5 +1,11 @@
 /// <reference path="../.astro/types.d.ts" />
 
+/**
+ * Build-time flag (astro.config.mjs): true only for staging builds
+ * (`CLOUDFLARE_ENV=staging`) and `astro dev`. Gates the test identity provider.
+ */
+declare const __COMINAVI_TEST_IDENTITY_PROVIDER__: boolean | undefined;
+
 interface CominaviWorkerEnv {
   COMINAVI_OAUTH_CIRCLEMS_PRODUCTION_ORIGIN: string;
   COMINAVI_OAUTH_CIRCLEMS_PRODUCTION_CLIENT_ID: string;
@@ -28,6 +34,7 @@ interface CominaviWorkerEnv {
   COMINAVI_TESTFLIGHT_URL: string;
   COMINAVI_SHARED_PLAN_MUTATIONS_ENABLED: string;
   ENVIRONMENT: string;
+  COMINAVI_TEST_IDENTITY_SECRET?: string;
   TWITTERAPI_IO_API_KEY: string;
   COMINAVI_DB: D1Database;
   COMINAVI_FOLLOWING_SNAPSHOTS: KVNamespace;
