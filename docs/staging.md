@@ -181,12 +181,18 @@ Safety:
   editions, capabilities, aliases, version state, stable/edition circles,
   overlay and snapshot heads) are upserted only when they differ. Target-only
   rows are never deleted.
-- Event activation (`catalog_events.active_version_id`) is applied after every
-  other table, so a failed or partial import leaves the previous catalog
-  active. Alias retirements are applied before live replacements.
+- Publication is the last step: new versions are written as invisible
+  `staging` rows, and version states plus event activation
+  (`catalog_events.active_version_id`) are applied together in one atomic
+  batch after every other table. A failed or partial import leaves the
+  previous catalog active and published. Alias retirements are applied before
+  live replacements.
 - Crawler snapshot `publication_cursor` values point into production's
-  realtime log, which is not mirrored, so they are rebased to `0` for the
-  target's own log.
+  realtime log, which is not mirrored. On import they are set to the target's
+  own current log position, so the imported snapshot replaces every earlier
+  target event. Re-importing the same snapshot keeps its original fence.
+- `CLOUDFLARE_ENV` is ignored: the source is always the top-level
+  (production) config, and the target is chosen only by `--target`.
 
 ## Known production-pinned values
 

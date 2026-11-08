@@ -12,6 +12,7 @@ import {
   exportPublishedData,
   importBundle,
   mirrorResources,
+  readWranglerConfig,
   type MirrorTarget,
 } from "../tools/mirror-published-data";
 import { SQLiteD1Database } from "./sqlite-d1";
@@ -487,6 +488,104 @@ test("the import target can never be a production resource", async () => {
     ...staging,
     databaseID: "11111111-1111-1111-1111-111111111111",
   });
+});
+
+test("snapshot cursors fence the target's existing append log", async () => {
+  const { source, staging, target, bundle } = setup();
+  staging.native.exec(`
+    PRAGMA foreign_keys = OFF;
+    INSERT INTO circle_update_events (
+      id, event_key, ingest_batch_id, source, source_revision, post_id,
+      update_kind, state_kind, state_value, confidence, occurred_at, created_at
+    ) VALUES (41, 'pre-import', 1, 'test', 1, 'p1', 'cover', 'cover', 'x', 'high', 1, 1);
+    PRAGMA foreign_keys = ON;
+  `);
+  await exportPublishedData(source, bundle);
+  await importBundle(bundle, target);
+  assert.equal(
+    count(
+      staging,
+      "SELECT publication_cursor AS n FROM crawler_snapshot_heads",
+    ),
+    41,
+  );
+
+  // Re-importing the same snapshot keeps its fence, even after the target
+  // log has grown; only a new revision would move it.
+  staging.native.exec(`
+    PRAGMA foreign_keys = OFF;
+    INSERT INTO circle_update_events (
+      id, event_key, ingest_batch_id, source, source_revision, post_id,
+      update_kind, state_kind, state_value, confidence, occurred_at, created_at
+    ) VALUES (42, 'post-import', 1, 'test', 1, 'p1', 'cover', 'cover', 'y', 'high', 2, 2);
+    PRAGMA foreign_keys = ON;
+  `);
+  await importBundle(bundle, target);
+  assert.equal(
+    count(
+      staging,
+      "SELECT publication_cursor AS n FROM crawler_snapshot_heads",
+    ),
+    41,
+  );
+});
+
+test("a failed import never retires the version that is still active", async () => {
+  const { production, source, staging, target, bundle } = setup();
+  await exportPublishedData(source, bundle);
+  await importBundle(bundle, target);
+
+  production.native.exec(`
+    INSERT INTO catalog_versions (
+      id, comiket_no, schema_version, state, claim_id,
+      source_main_sha256, source_image_sha256, circle_count,
+      created_at, published_at, catalog_event_key
+    ) VALUES ('c108-v4', 108, 1, 'published', 'claim-4',
+      '${"a".repeat(64)}', '${"b".repeat(64)}', 1, 4, 4, 'comiket-108');
+    INSERT INTO catalog_dates (version_id, day, date_iso, weekday)
+    VALUES ('c108-v4', 1, '2026-08-15', 6);
+    INSERT INTO catalog_circles (
+      version_id, comiket_no, wc_id, day, name, kana, pen_name, book_name, description
+    ) VALUES ('c108-v4', 108, 101, 1, 'Circle 101 v4', '', '', '', '');
+    UPDATE catalog_versions SET state = 'superseded' WHERE id = 'c108-v2';
+    UPDATE catalog_events SET active_version_id = 'c108-v4' WHERE comiket_no = 108;
+  `);
+  await exportPublishedData(source, bundle);
+  staging.native.exec(`
+    CREATE TRIGGER refuse_circles BEFORE INSERT ON catalog_circles
+    BEGIN SELECT RAISE(ABORT, 'simulated outage'); END;
+  `);
+  await assert.rejects(importBundle(bundle, target), /simulated outage/);
+  const state = (id: string) =>
+    (
+      staging.native
+        .prepare("SELECT state FROM catalog_versions WHERE id = ?")
+        .get(id) as { state: string }
+    ).state;
+  assert.equal(
+    state("c108-v2"),
+    "published",
+    "the active version stays published",
+  );
+  assert.equal(state("c108-v4"), "staging", "the new version stays invisible");
+
+  staging.native.exec("DROP TRIGGER refuse_circles");
+  await importBundle(bundle, target);
+  assert.equal(state("c108-v2"), "superseded");
+  assert.equal(state("c108-v4"), "published");
+});
+
+test("production is the top-level config even when CLOUDFLARE_ENV is set", async () => {
+  const saved = process.env.CLOUDFLARE_ENV;
+  process.env.CLOUDFLARE_ENV = "staging";
+  try {
+    const config = await readWranglerConfig();
+    assert.equal(config.name, "cominavi-homepage");
+    assert.equal(process.env.CLOUDFLARE_ENV, "staging", "restored");
+  } finally {
+    if (saved === undefined) delete process.env.CLOUDFLARE_ENV;
+    else process.env.CLOUDFLARE_ENV = saved;
+  }
 });
 
 test("snapshot cursors are rebased onto the target's own append log", async () => {

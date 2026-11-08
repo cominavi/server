@@ -498,6 +498,18 @@ export async function importBundle(
 
   let insertedRows = 0;
   const activations: Row[] = [];
+  const versionStates: Row[] = [];
+  // Crawler snapshot cursors are positions in the TARGET's realtime append
+  // log: the imported snapshot replaces every target event up to now.
+  const targetLogCursor = Number(
+    (
+      await target.database
+        .prepare(
+          `SELECT COALESCE(MAX("id"), 0) AS "cursor" FROM "circle_update_events"`,
+        )
+        .first<{ cursor: number }>()
+    )?.cursor ?? 0,
+  );
   for (const table of manifest.tables) {
     if (table.rows === 0) continue;
     let rows = readFileSync(
@@ -517,6 +529,29 @@ export async function importBundle(
       // version; the production pointers are applied after every table.
       activations.push(...rows);
       rows = rows.map(({ active_version_id: _, ...row }) => row);
+    }
+    let preserve: string[] = [];
+    let updateWhen: string[] | undefined;
+    if (table.table === "catalog_versions") {
+      // A version's state changes (published -> superseded) only together
+      // with event activation at the end. New versions land as invisible
+      // `staging` rows and existing ones keep their state until then, so a
+      // failed import never retires the version that is still active.
+      versionStates.push(...rows);
+      rows = rows.map((row) => ({ ...row, state: "staging" }));
+      preserve = ["state"];
+    }
+    if (
+      table.table === "crawler_snapshot_versions" ||
+      table.table === "crawler_snapshot_heads"
+    ) {
+      rows = rows.map((row) => ({
+        ...row,
+        publication_cursor: targetLogCursor,
+      }));
+      // Re-importing the same snapshot keeps its original fence; only a new
+      // revision moves the head (and its cursor).
+      if (table.table === "crawler_snapshot_heads") updateWhen = ["revision"];
     }
     if (table.table === "catalog_provider_aliases") {
       // Retirements first, so a live replacement never collides with the
@@ -539,7 +574,16 @@ export async function importBundle(
     for (let start = 0; start < rows.length; start += insertBatchSize) {
       const statements = rows
         .slice(start, start + insertBatchSize)
-        .map((row) => upsertStatement(target.database, table, columns, row));
+        .map((row) =>
+          upsertStatement(
+            target.database,
+            table,
+            columns,
+            row,
+            preserve,
+            updateWhen,
+          ),
+        );
       const results = await target.database.batch(statements);
       insertedRows += results.reduce(
         (sum, result) => sum + (result.meta.changes ?? 0),
@@ -547,17 +591,27 @@ export async function importBundle(
       );
     }
   }
-  for (let start = 0; start < activations.length; start += insertBatchSize) {
-    const results = await target.database.batch(
-      activations.slice(start, start + insertBatchSize).map((event) =>
-        target.database
-          .prepare(
-            `UPDATE "catalog_events" SET "active_version_id" = ?1
-             WHERE "comiket_no" = ?2 AND "active_version_id" IS NOT ?1`,
-          )
-          .bind(event.active_version_id, event.comiket_no),
-      ),
-    );
+  // Publication: version states and event activation in one atomic batch.
+  const publication = [
+    ...versionStates.map((version) =>
+      target.database
+        .prepare(
+          `UPDATE "catalog_versions" SET "state" = ?1
+           WHERE "id" = ?2 AND "state" IS NOT ?1`,
+        )
+        .bind(version.state, version.id),
+    ),
+    ...activations.map((event) =>
+      target.database
+        .prepare(
+          `UPDATE "catalog_events" SET "active_version_id" = ?1
+           WHERE "comiket_no" = ?2 AND "active_version_id" IS NOT ?1`,
+        )
+        .bind(event.active_version_id, event.comiket_no),
+    ),
+  ];
+  if (publication.length > 0) {
+    const results = await target.database.batch(publication);
     insertedRows += results.reduce(
       (sum, result) => sum + (result.meta.changes ?? 0),
       0,
@@ -571,6 +625,8 @@ function upsertStatement(
   table: MirrorTable,
   columns: string[],
   row: Row,
+  preserve: string[] = [],
+  updateWhen?: string[],
 ): D1PreparedStatement {
   const names = columns.map(quoteIdentifier).join(", ");
   const placeholders = columns.map((_, index) => `?${index + 1}`).join(", ");
@@ -588,18 +644,18 @@ function upsertStatement(
       )
       .bind(...values);
   }
-  const updates = columns
-    .filter((column) => !table.primaryKey.includes(column))
-    .map(
-      (column) =>
-        `${quoteIdentifier(column)} = excluded.${quoteIdentifier(column)}`,
-    );
-  const changed = columns
-    .filter((column) => !table.primaryKey.includes(column))
-    .map(
-      (column) =>
-        `${quoteIdentifier(table.table)}.${quoteIdentifier(column)} IS NOT excluded.${quoteIdentifier(column)}`,
-    );
+  const mutable = columns.filter(
+    (column) =>
+      !table.primaryKey.includes(column) && !preserve.includes(column),
+  );
+  const updates = mutable.map(
+    (column) =>
+      `${quoteIdentifier(column)} = excluded.${quoteIdentifier(column)}`,
+  );
+  const changed = (updateWhen ?? mutable).map(
+    (column) =>
+      `${quoteIdentifier(table.table)}.${quoteIdentifier(column)} IS NOT excluded.${quoteIdentifier(column)}`,
+  );
   return database
     .prepare(
       `INSERT INTO ${quoteIdentifier(table.table)} (${names}) VALUES (${placeholders})
@@ -709,6 +765,25 @@ export function assertReadOnlySQL(sql: string): void {
 // ---------------------------------------------------------------------------
 // Target resolution: production can never be a target
 
+/**
+ * Reads wrangler.jsonc for one environment. Wrangler falls back to the
+ * CLOUDFLARE_ENV variable when no environment is passed, so it is unset for
+ * the read: "production" must always mean the top-level config.
+ */
+async function readWranglerConfig(env?: string): Promise<ResolvedConfig> {
+  const { unstable_readConfig } = await import("wrangler");
+  const saved = process.env.CLOUDFLARE_ENV;
+  delete process.env.CLOUDFLARE_ENV;
+  try {
+    return unstable_readConfig({
+      config: "wrangler.jsonc",
+      env,
+    }) as unknown as ResolvedConfig;
+  } finally {
+    if (saved !== undefined) process.env.CLOUDFLARE_ENV = saved;
+  }
+}
+
 interface ResolvedConfig {
   name?: string;
   account_id?: string;
@@ -724,6 +799,8 @@ const bucketBindings: Record<BucketName, string> = {
   downloads: "COMINAVI_CATALOG_DOWNLOADS",
   catalogs: "COMINAVI_CATALOGS",
 };
+
+export { readWranglerConfig };
 
 export function mirrorResources(config: ResolvedConfig) {
   const database = config.d1_databases.find((d) => d.binding === "COMINAVI_DB");
@@ -777,12 +854,9 @@ async function openTarget(
   name: string,
   persistTo: string | undefined,
 ): Promise<{ target: MirrorTarget; dispose: () => Promise<void> }> {
-  const { getPlatformProxy, unstable_readConfig } = await import("wrangler");
-  const production = mirrorResources(
-    unstable_readConfig({
-      config: "wrangler.jsonc",
-    }) as unknown as ResolvedConfig,
-  );
+  const { getPlatformProxy } = await import("wrangler");
+  const productionConfig = await readWranglerConfig();
+  const production = mirrorResources(productionConfig);
   let proxy: Awaited<ReturnType<typeof getPlatformProxy<Cloudflare.Env>>>;
   if (name === "local") {
     // Local miniflare state only: no remote binding is ever created.
@@ -793,12 +867,7 @@ async function openTarget(
       remoteBindings: false,
     });
   } else if (name === "staging") {
-    const staging = mirrorResources(
-      unstable_readConfig({
-        config: "wrangler.jsonc",
-        env: "staging",
-      }) as unknown as ResolvedConfig,
-    );
+    const staging = mirrorResources(await readWranglerConfig("staging"));
     assertNotProduction(production, staging);
     // A throwaway config that binds exactly the staging D1 and buckets as
     // remote bindings. Nothing else, and never a production resource.
@@ -809,11 +878,7 @@ async function openTarget(
       configPath,
       JSON.stringify({
         name: `${staging.workerName}-mirror`,
-        account_id: (
-          unstable_readConfig({
-            config: "wrangler.jsonc",
-          }) as unknown as ResolvedConfig
-        ).account_id,
+        account_id: productionConfig.account_id,
         compatibility_date: "2026-07-14",
         d1_databases: [
           {
@@ -883,6 +948,9 @@ function argument(args: string[], name: string): string | undefined {
 
 async function main(args: string[]): Promise<void> {
   const command = args[0];
+  // The source is always production and the target is chosen by --target;
+  // an exported CLOUDFLARE_ENV must not silently redirect either one.
+  delete process.env.CLOUDFLARE_ENV;
   const log = (line: string) => console.error(line);
   if (command === "export") {
     const out = argument(args, "--out");
@@ -891,10 +959,7 @@ async function main(args: string[]): Promise<void> {
     if (!token) {
       throw new Error("Set COMINAVI_MIRROR_SOURCE_API_TOKEN (read-only).");
     }
-    const { unstable_readConfig } = await import("wrangler");
-    const config = unstable_readConfig({
-      config: "wrangler.jsonc",
-    }) as unknown as ResolvedConfig;
+    const config = await readWranglerConfig();
     const production = mirrorResources(config);
     const manifest = await exportPublishedData(
       new CloudflareAPISource({
