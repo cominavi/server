@@ -623,3 +623,24 @@ for (const [label, point] of [
     );
   });
 }
+
+test("a primary conflict caused by this request's own superseded commit replays the receipt", async () => {
+  const db = ledgerDatabase();
+  const request = attach("first_primary", "primary");
+  let original: Awaited<ReturnType<typeof commit>> | undefined;
+  const racing = interleaved(db, /join "curated_decisions"/i, async () => {
+    original = await commit(db, request);
+    await commit(db, {
+      ...attach("first_primary", "secondary"),
+      baseRevision: 1,
+    });
+    await commit(db, attach("second_primary", "primary"));
+  });
+  const result = await commitCuratedDecision(racing, request, operator, {
+    now: 1_000,
+    mintID: nextID,
+  });
+  assert.equal(original?.status, 201);
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.result, original?.result);
+});

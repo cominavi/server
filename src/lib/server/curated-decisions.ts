@@ -442,32 +442,15 @@ export async function commitCuratedDecision(
     const currentRevision = head?.slotRevision ?? 0;
     if (currentRevision !== request.baseRevision)
       return replayOrStale(db, request.requestID, requestSHA256, head);
-    const active = head?.activeDecisionID
-      ? await readDecision(db, head.activeDecisionID)
-      : null;
-    if (request.operation === "reverse") {
-      if (!active)
-        throw new ServiceError(
-          "nothing_to_reverse",
-          409,
-          "The slot has no active decision.",
-          {
-            currentRevision,
-          },
-        );
-      if (active.decisionType !== request.decisionType)
-        throw invalid(
-          "invalid_slot",
-          "A reverse names the active decision's type.",
-          {
-            activeDecisionType: active.decisionType,
-          },
-        );
-    } else if (
-      request.decisionType === "x_account_attach" &&
-      payload.role === "primary"
-    ) {
-      await assertNoOtherPrimary(db, key, circleKey, request.slot);
+    try {
+      await validateAgainstCurrentState(db, request, payload, head);
+    } catch (error) {
+      // A conflict observed after the first receipt lookup may have been
+      // caused by this exact request committing concurrently (and being
+      // superseded since): replay its receipt before reporting the conflict.
+      const replay = await readReceipt(db, request.requestID, requestSHA256);
+      if (replay) return replay;
+      throw error;
     }
 
     const ledgerSeq = previousSeq + 1;
@@ -592,6 +575,42 @@ async function readReceipt(
     replayed: true,
     result: JSON.parse(receipt.responseJSON),
   };
+}
+
+async function validateAgainstCurrentState(
+  db: CominaviDatabase,
+  request: CuratedDecisionRequest,
+  payload: Record<string, unknown>,
+  head: { slotRevision: number; activeDecisionID: string | null } | null,
+): Promise<void> {
+  const { catalogEventKey: key, circleKey } = request.subject;
+  const active = head?.activeDecisionID
+    ? await readDecision(db, head.activeDecisionID)
+    : null;
+  if (request.operation === "reverse") {
+    if (!active)
+      throw new ServiceError(
+        "nothing_to_reverse",
+        409,
+        "The slot has no active decision.",
+        {
+          currentRevision: head?.slotRevision ?? 0,
+        },
+      );
+    if (active.decisionType !== request.decisionType)
+      throw invalid(
+        "invalid_slot",
+        "A reverse names the active decision's type.",
+        {
+          activeDecisionType: active.decisionType,
+        },
+      );
+  } else if (
+    request.decisionType === "x_account_attach" &&
+    payload.role === "primary"
+  ) {
+    await assertNoOtherPrimary(db, key, circleKey, request.slot);
+  }
 }
 
 /**
