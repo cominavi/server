@@ -430,10 +430,18 @@ export async function commitCuratedDecision(
   }
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
+    // Edition sequence fence first: every check below (slot head, active
+    // decision, cross-slot primary) is invalidated by any ledger commit after
+    // this snapshot, because the batch's decision insert is conditional on it.
+    const [ledger] = await db
+      .select({ ledgerSeq: curatedEditionLedgerHeads.ledgerSeq })
+      .from(curatedEditionLedgerHeads)
+      .where(eq(curatedEditionLedgerHeads.catalogEventKey, key));
+    const previousSeq = ledger?.ledgerSeq ?? 0;
     const head = await readHead(db, key, circleKey, request.slot);
     const currentRevision = head?.slotRevision ?? 0;
     if (currentRevision !== request.baseRevision)
-      throw await staleBase(db, head);
+      return replayOrStale(db, request.requestID, requestSHA256, head);
     const active = head?.activeDecisionID
       ? await readDecision(db, head.activeDecisionID)
       : null;
@@ -462,11 +470,6 @@ export async function commitCuratedDecision(
       await assertNoOtherPrimary(db, key, circleKey, request.slot);
     }
 
-    const [ledger] = await db
-      .select({ ledgerSeq: curatedEditionLedgerHeads.ledgerSeq })
-      .from(curatedEditionLedgerHeads)
-      .where(eq(curatedEditionLedgerHeads.catalogEventKey, key));
-    const previousSeq = ledger?.ledgerSeq ?? 0;
     const ledgerSeq = previousSeq + 1;
     const slotRevision = request.baseRevision + 1;
     const decisionID = (
@@ -550,9 +553,11 @@ export async function commitCuratedDecision(
       );
       return { status: 201, replayed: false, result };
     } catch (error) {
+      // Head before receipt: an identical request that committed after our
+      // first receipt lookup is visible by the time its head is.
+      const now = await readHead(db, key, circleKey, request.slot);
       const recovered = await readReceipt(db, request.requestID, requestSHA256);
       if (recovered) return recovered;
-      const now = await readHead(db, key, circleKey, request.slot);
       if ((now?.slotRevision ?? 0) !== request.baseRevision)
         throw await staleBase(db, now);
       // The edition sequence advanced concurrently: retry against it.
@@ -587,6 +592,21 @@ async function readReceipt(
     replayed: true,
     result: JSON.parse(receipt.responseJSON),
   };
+}
+
+/**
+ * A changed slot head is a stale base only if this exact request did not
+ * commit it: recheck the receipt (after the head read) before conflicting.
+ */
+async function replayOrStale(
+  db: CominaviDatabase,
+  requestID: string,
+  requestSHA256: string,
+  head: { slotRevision: number; activeDecisionID: string | null } | null,
+): Promise<CuratedDecisionCommit> {
+  const replay = await readReceipt(db, requestID, requestSHA256);
+  if (replay) return replay;
+  throw await staleBase(db, head);
 }
 
 async function readHead(

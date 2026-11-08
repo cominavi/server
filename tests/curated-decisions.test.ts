@@ -514,3 +514,112 @@ test("the documented 0012 rollback restores the pre-0012 schema", () => {
   `);
   assert.deepEqual(snapshot(after), snapshot(before));
 });
+
+/**
+ * A D1 binding that runs `hook` once, immediately before the first statement
+ * whose SQL matches `pattern` (or before the first batch when `pattern` is
+ * "batch"), to commit a competing request at an exact interleaving point.
+ */
+function interleaved(
+  db: SQLiteD1Database,
+  pattern: RegExp | "batch",
+  hook: () => Promise<unknown>,
+): D1Database {
+  let fired = false;
+  const fire = async () => {
+    if (fired) return;
+    fired = true;
+    await hook();
+  };
+  const wrap = (statement: any, query: string): any =>
+    new Proxy(statement, {
+      get(target, property) {
+        const value = target[property];
+        if (typeof value !== "function") return value;
+        if (property === "bind")
+          return (...args: unknown[]) => wrap(value.apply(target, args), query);
+        if (["all", "raw", "first", "run"].includes(String(property)))
+          return async (...args: unknown[]) => {
+            if (pattern !== "batch" && pattern.test(query)) await fire();
+            return value.apply(target, args);
+          };
+        return value.bind(target);
+      },
+    });
+  return {
+    prepare: (query: string) => wrap(db.binding.prepare(query), query),
+    batch: async (statements: D1PreparedStatement[]) => {
+      if (pattern === "batch") await fire();
+      return db.binding.batch(statements);
+    },
+  } as unknown as D1Database;
+}
+
+test("an identical request committed after the receipt lookup replays instead of conflicting", async () => {
+  const db = ledgerDatabase();
+  const request = attendance();
+  let competing: Awaited<ReturnType<typeof commit>> | undefined;
+  const racing = interleaved(db, /from "curated_decision_heads"/i, async () => {
+    competing = await commit(db, request);
+  });
+  const result = await commitCuratedDecision(racing, request, operator, {
+    now: 1_000,
+    mintID: nextID,
+  });
+  assert.equal(competing?.status, 201);
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.result, competing?.result);
+  assert.equal(db.rows("SELECT count(*) AS n FROM curated_decisions")[0].n, 1);
+});
+
+test("a different payload committed under the same requestID after the lookup conflicts", async () => {
+  const db = ledgerDatabase();
+  const request = attendance();
+  const racing = interleaved(db, /from "curated_decision_heads"/i, () =>
+    commit(db, { ...request, payload: { status: "attending" } }),
+  );
+  await rejectsWith(
+    commitCuratedDecision(racing, request, operator, {
+      now: 1_000,
+      mintID: nextID,
+    }),
+    "request_payload_conflict",
+    409,
+  );
+});
+
+for (const [label, point] of [
+  [
+    "before the edition sequence snapshot",
+    /from "curated_edition_ledger_heads"/i,
+  ],
+  ["between the primary check and the batch", "batch"],
+] as const) {
+  test(`a competing primary committed ${label} cannot leave two primaries`, async () => {
+    const db = ledgerDatabase();
+    const racing = interleaved(db, point, () =>
+      commit(db, attach("second_primary", "primary")),
+    );
+    await rejectsWith(
+      commitCuratedDecision(
+        racing,
+        attach("first_primary", "primary"),
+        operator,
+        {
+          now: 1_000,
+          mintID: nextID,
+        },
+      ),
+      "primary_account_conflict",
+      409,
+    );
+    assert.deepEqual(
+      db.rows(`
+        SELECT head.slot FROM curated_decision_heads AS head
+        JOIN curated_decisions AS decision ON decision.decision_id = head.active_decision_id
+        WHERE decision.decision_type = 'x_account_attach'
+          AND json_extract(decision.payload_json, '$.role') = 'primary'`),
+      [{ slot: "x_account:handle:second_primary" }],
+    );
+  });
+}
