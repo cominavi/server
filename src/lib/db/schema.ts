@@ -12,7 +12,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-// This schema mirrors the final D1 shape after migrations 0001-0010.
+// This schema mirrors the final D1 shape after migrations 0001-0011.
 // The checked-in SQL migrations remain deployment authority; this module
 // provides the typed query surface for Worker services.
 
@@ -318,11 +318,19 @@ export const catalogVersions = sqliteTable(
     imageCount: integer("image_count").notNull().default(sql.raw("0")),
     createdAt: integer("created_at").notNull(),
     publishedAt: integer("published_at"),
+    catalogEventKey: text("catalog_event_key"),
+    artifactFormat: integer("artifact_format"),
+    sourceAdapterVersion: integer("source_adapter_version"),
+    capabilitySnapshotJSON: text("capability_snapshot_json"),
   },
   (table) => [
     foreignKey({
       columns: [table.comiketNo],
       foreignColumns: [catalogEvents.comiketNo],
+    }),
+    foreignKey({
+      columns: [table.catalogEventKey],
+      foreignColumns: [catalogEditions.catalogEventKey],
     }),
     index("catalog_versions_event_state").on(
       table.comiketNo,
@@ -369,6 +377,7 @@ export const catalogVersions = sqliteTable(
     check("catalog_versions_check_15", sql.raw("circle_count >= 0")),
     check("catalog_versions_check_16", sql.raw("layout_count >= 0")),
     check("catalog_versions_check_17", sql.raw("image_count >= 0")),
+    check("catalog_versions_check_18", sql.raw("artifact_format IN (1, 2)")),
   ],
 );
 
@@ -1502,6 +1511,222 @@ export const catalogStableCircles = sqliteTable(
     }),
     check("catalog_stable_circles_check_1", sql.raw("wc_id > 0")),
   ],
+);
+
+export const catalogEditions = sqliteTable(
+  "catalog_editions",
+  {
+    catalogEventKey: text("catalog_event_key").primaryKey(),
+    seriesKey: text("series_key", {
+      enum: ["comiket", "fixture"] as const,
+    }).notNull(),
+    legacyComiketNo: integer("legacy_comiket_no"),
+    metadataSchemaVersion: integer("metadata_schema_version").notNull(),
+    metadataJSON: text("metadata_json").notNull(),
+    metadataRevision: integer("metadata_revision").notNull(),
+    sourceProvider: text("source_provider", {
+      enum: ["circlems", "fixture"] as const,
+    }).notNull(),
+    listingState: text("listing_state", {
+      enum: ["hidden", "listed", "retired"] as const,
+    }).notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.legacyComiketNo],
+      foreignColumns: [catalogEvents.comiketNo],
+    }),
+    unique().on(table.legacyComiketNo),
+    check(
+      "catalog_editions_check_1",
+      sql.raw(
+        "length(catalog_event_key) BETWEEN 3 AND 64 AND catalog_event_key GLOB '[a-z]*' AND catalog_event_key NOT GLOB '*[^a-z0-9-]*' AND catalog_event_key NOT GLOB '*--*' AND catalog_event_key NOT GLOB '*-' AND NOT (catalog_event_key GLOB 'c[0-9]*' AND substr(catalog_event_key, 2) NOT GLOB '*[^0-9]*') AND catalog_event_key NOT GLOB 'event-*'",
+      ),
+    ),
+    check(
+      "catalog_editions_check_2",
+      sql.raw("series_key IN ('comiket', 'fixture')"),
+    ),
+    check("catalog_editions_check_3", sql.raw("metadata_schema_version = 1")),
+    check("catalog_editions_check_4", sql.raw("json_valid(metadata_json)")),
+    check("catalog_editions_check_5", sql.raw("metadata_revision > 0")),
+    check(
+      "catalog_editions_check_6",
+      sql.raw("source_provider IN ('circlems', 'fixture')"),
+    ),
+    check(
+      "catalog_editions_check_7",
+      sql.raw("listing_state IN ('hidden', 'listed', 'retired')"),
+    ),
+    check(
+      "catalog_editions_check_8",
+      sql.raw("(series_key = 'comiket') = (legacy_comiket_no IS NOT NULL)"),
+    ),
+    check(
+      "catalog_editions_check_9",
+      sql.raw(
+        "series_key = 'comiket' OR NOT (catalog_event_key GLOB 'comiket-[0-9]*' AND substr(catalog_event_key, 9) NOT GLOB '*[^0-9]*')",
+      ),
+    ),
+  ],
+);
+
+export const catalogEditionCapabilityNames = [
+  "catalogArtifact",
+  "circleImages",
+  "commonImages",
+  "venueMap",
+  "favorites",
+  "providerFavoriteMirror",
+  "socialEnrichment",
+  "realtimeUpdates",
+  "attendanceStatus",
+  "tagOverlay",
+  "curatedOverlay",
+  "structuredShinagaki",
+  "circleReports",
+  "reminders",
+  "sharedPlans",
+] as const;
+
+export const catalogEditionCapabilities = sqliteTable(
+  "catalog_edition_capabilities",
+  {
+    catalogEventKey: text("catalog_event_key").notNull(),
+    capability: text("capability", {
+      enum: catalogEditionCapabilityNames,
+    }).notNull(),
+    state: text("state", {
+      enum: ["supported", "unsupported"] as const,
+    }).notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.catalogEventKey, table.capability] }),
+    foreignKey({
+      columns: [table.catalogEventKey],
+      foreignColumns: [catalogEditions.catalogEventKey],
+    }),
+    check(
+      "catalog_edition_capabilities_check_1",
+      sql.raw(
+        "capability IN ( 'catalogArtifact', 'circleImages', 'commonImages', 'venueMap', 'favorites', 'providerFavoriteMirror', 'socialEnrichment', 'realtimeUpdates', 'attendanceStatus', 'tagOverlay', 'curatedOverlay', 'structuredShinagaki', 'circleReports', 'reminders', 'sharedPlans' )",
+      ),
+    ),
+    check(
+      "catalog_edition_capabilities_check_2",
+      sql.raw("state IN ('supported', 'unsupported')"),
+    ),
+  ],
+);
+
+export const catalogProviderAliases = sqliteTable(
+  "catalog_provider_aliases",
+  {
+    provider: text("provider", { enum: ["circlems"] as const }).notNull(),
+    providerEnvironment: text("provider_environment", {
+      enum: ["production"] as const,
+    }).notNull(),
+    aliasKind: text("alias_kind", {
+      enum: ["circlems_event_id", "wcid"] as const,
+    }).notNull(),
+    aliasScope: text("alias_scope").notNull(),
+    aliasValue: text("alias_value").notNull(),
+    catalogEventKey: text("catalog_event_key").notNull(),
+    circleKey: text("circle_key"),
+    createdAt: integer("created_at").notNull(),
+    retiredAt: integer("retired_at"),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.provider,
+        table.providerEnvironment,
+        table.aliasKind,
+        table.aliasScope,
+        table.aliasValue,
+      ],
+    }),
+    foreignKey({
+      columns: [table.catalogEventKey],
+      foreignColumns: [catalogEditions.catalogEventKey],
+    }),
+    uniqueIndex("catalog_provider_aliases_live_target")
+      .on(
+        table.provider,
+        table.providerEnvironment,
+        table.aliasKind,
+        table.catalogEventKey,
+        sql`ifnull(${table.circleKey}, '')`,
+      )
+      .where(sql.raw("retired_at IS NULL")),
+    check(
+      "catalog_provider_aliases_check_1",
+      sql.raw("provider IN ('circlems')"),
+    ),
+    check(
+      "catalog_provider_aliases_check_2",
+      sql.raw("provider_environment IN ('production')"),
+    ),
+    check(
+      "catalog_provider_aliases_check_3",
+      sql.raw("alias_kind IN ('circlems_event_id', 'wcid')"),
+    ),
+  ],
+);
+
+export const catalogEditionCircles = sqliteTable(
+  "catalog_edition_circles",
+  {
+    catalogEventKey: text("catalog_event_key").notNull(),
+    circleKey: text("circle_key").notNull(),
+    legacyWCID: integer("legacy_wc_id"),
+    keyOrigin: text("key_origin", {
+      enum: ["provider_durable", "minted"] as const,
+    }).notNull(),
+    firstVersionID: text("first_version_id").notNull(),
+    lastVersionID: text("last_version_id").notNull(),
+    firstPublishedAt: integer("first_published_at").notNull(),
+    lastPublishedAt: integer("last_published_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.catalogEventKey, table.circleKey] }),
+    foreignKey({
+      columns: [table.catalogEventKey],
+      foreignColumns: [catalogEditions.catalogEventKey],
+    }),
+    foreignKey({
+      columns: [table.firstVersionID],
+      foreignColumns: [catalogVersions.id],
+    }),
+    foreignKey({
+      columns: [table.lastVersionID],
+      foreignColumns: [catalogVersions.id],
+    }),
+    unique().on(table.catalogEventKey, table.legacyWCID),
+    check(
+      "catalog_edition_circles_check_1",
+      sql.raw(
+        "(circle_key GLOB '[1-9]*' AND circle_key NOT GLOB '*[^0-9]*') OR ( length(circle_key) = 17 AND circle_key GLOB 'm*' AND substr(circle_key, 2) NOT GLOB '*[^0123456789abcdefghjkmnpqrstvwxyz]*' )",
+      ),
+    ),
+    check("catalog_edition_circles_check_2", sql.raw("legacy_wc_id > 0")),
+    check(
+      "catalog_edition_circles_check_3",
+      sql.raw("key_origin IN ('provider_durable', 'minted')"),
+    ),
+  ],
+);
+
+export const catalogIdentityBackfillCheckpoints = sqliteTable(
+  "catalog_identity_backfill_checkpoints",
+  {
+    step: text("step").primaryKey(),
+    lastKey: text("last_key"),
+    completedAt: integer("completed_at"),
+  },
 );
 
 export const circleUpdateEvents = sqliteTable(
@@ -3019,9 +3244,13 @@ export const migratedTables = {
   catalog_blocks: catalogBlocks,
   catalog_circles: catalogCircles,
   catalog_dates: catalogDates,
+  catalog_edition_capabilities: catalogEditionCapabilities,
+  catalog_edition_circles: catalogEditionCircles,
+  catalog_editions: catalogEditions,
   catalog_events: catalogEvents,
   catalog_floors: catalogFloors,
   catalog_genres: catalogGenres,
+  catalog_identity_backfill_checkpoints: catalogIdentityBackfillCheckpoints,
   catalog_image_assets: catalogImageAssets,
   catalog_import_claims: catalogImportClaims,
   catalog_internal_command_receipts: catalogInternalCommandReceipts,
@@ -3029,6 +3258,7 @@ export const migratedTables = {
   catalog_mappings: catalogMappings,
   catalog_maps: catalogMaps,
   catalog_multipart_upload_receipts: catalogMultipartUploadReceipts,
+  catalog_provider_aliases: catalogProviderAliases,
   catalog_refresh_command_receipts: catalogRefreshCommandReceipts,
   catalog_refresh_failures: catalogRefreshFailures,
   catalog_refresh_jobs: catalogRefreshJobs,

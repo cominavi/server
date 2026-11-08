@@ -481,7 +481,9 @@ export async function stageCatalogVersion(
              ${input.mapCount}, ${input.areaCount}, ${input.blockCount},
              ${input.floorCount}, ${input.mappingCount}, ${input.genreCount},
              ${input.circleCount}, ${input.layoutCount}, ${input.imageCount},
-             ${input.now}, NULL
+             ${input.now}, NULL,
+             -- 0011 catalog identity columns stay NULL until dual-write (P3).
+             NULL, NULL, NULL, NULL
       FROM ${catalogImportClaims}
       WHERE ${catalogImportClaims.comiketNo} = ${input.comiketNo}
         AND ${catalogImportClaims.claimID} = ${input.claimID}
