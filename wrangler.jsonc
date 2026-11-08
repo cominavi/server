@@ -49,6 +49,7 @@
     "COMINAVI_APPLE_TEAM_ID": "F25GFFJL49",
     "COMINAVI_TESTFLIGHT_URL": "https://testflight.apple.com/join/HrDC1xuC",
     "COMINAVI_SHARED_PLAN_MUTATIONS_ENABLED": "true",
+    "ENVIRONMENT": "production",
   },
   "d1_databases": [
     {
@@ -124,5 +125,107 @@
   },
   "triggers": {
     "crons": ["*/2 * * * *"],
+  },
+  // Hosted staging (docs/staging.md). Build and deploy only with
+  // CLOUDFLARE_ENV=staging; nothing below is shared with production. Bindings,
+  // vars, routes, and triggers are not inherited, so every one is redeclared.
+  // The zero IDs are placeholders until the resources are created.
+  "env": {
+    "staging": {
+      "name": "cominavi-homepage-staging",
+      "routes": [
+        {
+          "pattern": "staging.cominavi.net",
+          "custom_domain": true,
+        },
+      ],
+      "vars": {
+        "COMINAVI_OAUTH_CIRCLEMS_PRODUCTION_ORIGIN": "https://auth1.circle.ms",
+        "COMINAVI_OAUTH_CIRCLEMS_SANDBOX_ORIGIN": "https://auth1-sandbox.circle.ms",
+        "COMINAVI_CIRCLEMS_PRODUCTION_API_ORIGIN": "https://api1.circle.ms",
+        "COMINAVI_CIRCLEMS_SANDBOX_API_ORIGIN": "https://api1-sandbox.circle.ms",
+        "COMINAVI_APNS_BUNDLE_IDS": "llc.mikunet.cominavi.staging,llc.mikunet.cominavi.debug",
+        "COMINAVI_APPLE_CLIENT_IDS": "llc.mikunet.cominavi.staging,llc.mikunet.cominavi.debug",
+        "COMINAVI_APPLE_TEAM_ID": "F25GFFJL49",
+        "COMINAVI_TESTFLIGHT_URL": "https://testflight.apple.com/join/HrDC1xuC",
+        "COMINAVI_SHARED_PLAN_MUTATIONS_ENABLED": "true",
+        "ENVIRONMENT": "staging",
+      },
+      "d1_databases": [
+        {
+          "binding": "COMINAVI_DB",
+          "database_name": "cominavi-staging",
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "migrations",
+        },
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "SESSION",
+          "id": "00000000000000000000000000000001",
+        },
+        {
+          "binding": "COMINAVI_FOLLOWING_SNAPSHOTS",
+          "id": "00000000000000000000000000000002",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "COMINAVI_AVATARS",
+          "bucket_name": "cominavi-avatars-staging",
+        },
+        {
+          "binding": "COMINAVI_CATALOGS",
+          "bucket_name": "cominavi-catalogs-private-staging",
+        },
+        {
+          "binding": "COMINAVI_CATALOG_DOWNLOADS",
+          "bucket_name": "cominavi-catalog-downloads-staging",
+        },
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "COMINAVI_PLAN_SYNC",
+            "class_name": "PlanSyncObject",
+          },
+        ],
+      },
+      "migrations": [
+        {
+          "tag": "v1-plan-sync",
+          "new_sqlite_classes": ["PlanSyncObject"],
+        },
+      ],
+      "ratelimits": [
+        {
+          "name": "COMINAVI_INVITE_RATE_LIMITER",
+          "namespace_id": "1002",
+          "simple": { "limit": 30, "period": 60 },
+        },
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "COMINAVI_PUSH_QUEUE",
+            "queue": "cominavi-push-staging",
+          },
+        ],
+        "consumers": [
+          {
+            "queue": "cominavi-push-staging",
+            "max_batch_size": 20,
+            "max_batch_timeout": 5,
+            "max_retries": 8,
+            "retry_delay": 15,
+            "dead_letter_queue": "cominavi-push-staging-dlq",
+            "max_concurrency": 5,
+          },
+        ],
+      },
+      "triggers": {
+        "crons": ["*/2 * * * *"],
+      },
+    },
   },
 }
