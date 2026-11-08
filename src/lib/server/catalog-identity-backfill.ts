@@ -377,6 +377,8 @@ async function backfillCircles(
     cursor = 0;
   }
 
+  if (maxChunks > 0) await assertLiveWCIDAliasesCanonical(db, key);
+
   let chunks = 0;
   let circlesWritten = 0;
   while (chunks < maxChunks) {
@@ -470,32 +472,43 @@ async function assertCircleRangeConsistent(
   from: number,
   to: number,
 ): Promise<void> {
-  const [circle] = await db
-    .select({
-      wcID: catalogStableCircles.wcID,
-      circleKey: catalogEditionCircles.circleKey,
-      legacyWCID: catalogEditionCircles.legacyWCID,
-      keyOrigin: catalogEditionCircles.keyOrigin,
-    })
-    .from(catalogStableCircles)
-    .innerJoin(
-      catalogEditionCircles,
-      and(
-        eq(catalogEditionCircles.catalogEventKey, key),
-        sql`(${catalogEditionCircles.circleKey} = CAST(${catalogStableCircles.wcID} AS TEXT)
-             OR ${catalogEditionCircles.legacyWCID} = ${catalogStableCircles.wcID})`,
-      ),
-    )
-    .where(
-      and(
-        eq(catalogStableCircles.comiketNo, comiketNo),
-        sql`${catalogStableCircles.wcID} > ${from} AND ${catalogStableCircles.wcID} <= ${to}`,
-        sql`NOT (${catalogEditionCircles.circleKey} = CAST(${catalogStableCircles.wcID} AS TEXT)
-                 AND ${catalogEditionCircles.legacyWCID} IS ${catalogStableCircles.wcID}
-                 AND ${catalogEditionCircles.keyOrigin} = 'provider_durable')`,
-      ),
-    )
-    .limit(1);
+  // Each check is a separate lookup on one full index key per stable circle
+  // (no OR joins), so a chunk costs O(chunk) index probes, not a scan of the
+  // edition's population.
+  const range = sql`stable.comiket_no = ${comiketNo}
+    AND stable.wc_id > ${from} AND stable.wc_id <= ${to}`;
+  const circleByKey = await db.all<{
+    wcID: number;
+    circleKey: string;
+    legacyWCID: number | null;
+  }>(sql`
+    SELECT stable.wc_id AS wcID, edition.circle_key AS circleKey,
+           edition.legacy_wc_id AS legacyWCID
+    FROM catalog_stable_circles AS stable
+    JOIN catalog_edition_circles AS edition
+      ON edition.catalog_event_key = ${key}
+     AND edition.circle_key = CAST(stable.wc_id AS TEXT)
+    WHERE ${range}
+      AND (edition.legacy_wc_id IS NOT stable.wc_id
+        OR edition.key_origin IS NOT 'provider_durable')
+    LIMIT 1`);
+  const circleByLegacy = circleByKey.length
+    ? circleByKey
+    : await db.all<{
+        wcID: number;
+        circleKey: string;
+        legacyWCID: number | null;
+      }>(sql`
+        SELECT stable.wc_id AS wcID, edition.circle_key AS circleKey,
+               edition.legacy_wc_id AS legacyWCID
+        FROM catalog_stable_circles AS stable
+        JOIN catalog_edition_circles AS edition
+          ON edition.catalog_event_key = ${key}
+         AND edition.legacy_wc_id = stable.wc_id
+        WHERE ${range}
+          AND edition.circle_key IS NOT CAST(stable.wc_id AS TEXT)
+        LIMIT 1`);
+  const [circle] = circleByLegacy;
   if (circle)
     throw new CatalogIdentityCollision("circle_key_conflict", {
       catalogEventKey: key,
@@ -504,40 +517,29 @@ async function assertCircleRangeConsistent(
       existingLegacyWCID: circle.legacyWCID,
     });
 
-  const [alias] = await db
-    .select({
-      wcID: catalogStableCircles.wcID,
-      aliasValue: catalogProviderAliases.aliasValue,
-      circleKey: catalogProviderAliases.circleKey,
-      aliasKey: catalogProviderAliases.catalogEventKey,
-      retiredAt: catalogProviderAliases.retiredAt,
-    })
-    .from(catalogStableCircles)
-    .innerJoin(
-      catalogProviderAliases,
-      and(
-        eq(catalogProviderAliases.provider, "circlems"),
-        eq(catalogProviderAliases.providerEnvironment, "production"),
-        eq(catalogProviderAliases.aliasKind, "wcid"),
-        sql`((${catalogProviderAliases.aliasScope} = ${key}
-              AND ${catalogProviderAliases.aliasValue} = CAST(${catalogStableCircles.wcID} AS TEXT))
-          OR (${catalogProviderAliases.catalogEventKey} = ${key}
-              AND ${catalogProviderAliases.circleKey} = CAST(${catalogStableCircles.wcID} AS TEXT)
-              AND ${catalogProviderAliases.retiredAt} IS NULL))`,
-      ),
-    )
-    .where(
-      and(
-        eq(catalogStableCircles.comiketNo, comiketNo),
-        sql`${catalogStableCircles.wcID} > ${from} AND ${catalogStableCircles.wcID} <= ${to}`,
-        sql`NOT (${catalogProviderAliases.aliasScope} = ${key}
-                 AND ${catalogProviderAliases.aliasValue} = CAST(${catalogStableCircles.wcID} AS TEXT)
-                 AND ${catalogProviderAliases.catalogEventKey} = ${key}
-                 AND ${catalogProviderAliases.circleKey} IS CAST(${catalogStableCircles.wcID} AS TEXT)
-                 AND ${catalogProviderAliases.retiredAt} IS NULL)`,
-      ),
-    )
-    .limit(1);
+  type AliasRow = {
+    wcID: number;
+    aliasValue: string;
+    circleKey: string | null;
+    aliasKey: string;
+    retiredAt: number | null;
+  };
+  // The alias primary key: (provider, environment, kind, scope, value).
+  const aliasByValue = await db.all<AliasRow>(sql`
+    SELECT stable.wc_id AS wcID, alias.alias_value AS aliasValue,
+           alias.circle_key AS circleKey, alias.catalog_event_key AS aliasKey,
+           alias.retired_at AS retiredAt
+    FROM catalog_stable_circles AS stable
+    JOIN catalog_provider_aliases AS alias
+      ON alias.provider = 'circlems' AND alias.provider_environment = 'production'
+     AND alias.alias_kind = 'wcid' AND alias.alias_scope = ${key}
+     AND alias.alias_value = CAST(stable.wc_id AS TEXT)
+    WHERE ${range}
+      AND (alias.catalog_event_key IS NOT ${key}
+        OR alias.circle_key IS NOT CAST(stable.wc_id AS TEXT)
+        OR alias.retired_at IS NOT NULL)
+    LIMIT 1`);
+  const [alias] = aliasByValue;
   if (alias)
     throw new CatalogIdentityCollision("circle_alias_conflict", {
       catalogEventKey: key,
@@ -546,6 +548,39 @@ async function assertCircleRangeConsistent(
       existingCircleKey: alias.circleKey,
       existingAliasKey: alias.aliasKey,
       existingRetiredAt: alias.retiredAt,
+    });
+}
+
+/**
+ * A Circle.ms edition's live WCID aliases always map value -> the same
+ * circle key in the edition's own scope. One query per edition, bounded by
+ * the live-target index prefix (provider, environment, kind, edition), finds
+ * any alias that targets an edition circle under a different value or scope.
+ * The in-batch guard still catches one written concurrently.
+ */
+async function assertLiveWCIDAliasesCanonical(
+  db: CominaviDatabase,
+  key: string,
+): Promise<void> {
+  const [alias] = await db.all<{
+    aliasScope: string;
+    aliasValue: string;
+    circleKey: string | null;
+  }>(sql`
+    SELECT alias_scope AS aliasScope, alias_value AS aliasValue,
+           circle_key AS circleKey
+    FROM catalog_provider_aliases INDEXED BY catalog_provider_aliases_live_target
+    WHERE provider = 'circlems' AND provider_environment = 'production'
+      AND alias_kind = 'wcid' AND catalog_event_key = ${key}
+      AND retired_at IS NULL
+      AND (alias_scope IS NOT ${key} OR alias_value IS NOT circle_key)
+    LIMIT 1`);
+  if (alias)
+    throw new CatalogIdentityCollision("circle_alias_conflict", {
+      catalogEventKey: key,
+      existingAliasScope: alias.aliasScope,
+      existingAliasValue: alias.aliasValue,
+      existingCircleKey: alias.circleKey,
     });
 }
 
