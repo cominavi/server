@@ -19,6 +19,7 @@ const migrations = [
   "migrations/0008_circle_tag_overlays.sql",
   "migrations/0009_crawler_realtime_snapshots.sql",
   "migrations/0010_shinagaki_analysis.sql",
+  "migrations/0011_catalog_identity.sql",
 ];
 
 const expectedTextEnums: Record<string, string[]> = {
@@ -39,6 +40,28 @@ const expectedTextEnums: Record<string, string[]> = {
   "avatar_object_cleanup.state": ["queued", "leased"],
   "catalog_artifacts.kind": ["source_main", "source_image", "derived_catalog"],
   "catalog_artifacts.visibility": ["private_source", "authenticated_download"],
+  "catalog_edition_capabilities.capability": [
+    "catalogArtifact",
+    "circleImages",
+    "commonImages",
+    "venueMap",
+    "favorites",
+    "providerFavoriteMirror",
+    "socialEnrichment",
+    "realtimeUpdates",
+    "attendanceStatus",
+    "tagOverlay",
+    "curatedOverlay",
+    "structuredShinagaki",
+    "circleReports",
+    "reminders",
+    "sharedPlans",
+  ],
+  "catalog_edition_capabilities.state": ["supported", "unsupported"],
+  "catalog_edition_circles.key_origin": ["provider_durable", "minted"],
+  "catalog_editions.listing_state": ["hidden", "listed", "retired"],
+  "catalog_editions.series_key": ["comiket", "fixture"],
+  "catalog_editions.source_provider": ["circlems", "fixture"],
   "catalog_image_assets.kind": ["circle_cut", "common"],
   "catalog_image_assets.content_type": [
     "image/jpeg",
@@ -60,6 +83,9 @@ const expectedTextEnums: Record<string, string[]> = {
     "complete",
     "release",
   ],
+  "catalog_provider_aliases.alias_kind": ["circlems_event_id", "wcid"],
+  "catalog_provider_aliases.provider": ["circlems"],
+  "catalog_provider_aliases.provider_environment": ["production"],
   "catalog_refresh_jobs.state": ["queued", "leased", "published", "failed"],
   "catalog_versions.state": ["staging", "published", "superseded", "failed"],
   "circle_tag_overlay_object_cleanup.state": ["queued", "leased"],
@@ -378,7 +404,7 @@ function drizzleExplicitIndexes(
         if ("name" in column) return `${column.name}:asc`;
         const rendered = dialect.sqlToQuery(column, "indexes").sql;
         const match = rendered.match(/^"([^"]+)"(?: (asc|desc))?$/i);
-        assert.ok(match, `unsupported Drizzle index expression: ${rendered}`);
+        if (!match) return `expr:${normalizeIndexExpression(rendered)}:asc`;
         return `${match[1]}:${(match[2] ?? "asc").toLowerCase()}`;
       }),
       where: index.where
@@ -417,13 +443,18 @@ function migratedExplicitIndexes(
         )
         .get(name) as { sql: string };
       const where = source.sql.match(/\sWHERE\s+([\s\S]+)$/i)?.[1];
+      const terms = indexColumnTerms(source.sql);
       return {
         name,
         unique: unique === 1,
         columns: columns
           .filter((column) => column.key === 1)
           .toSorted((left, right) => left.seqno - right.seqno)
-          .map((column) => `${column.name}:${column.desc ? "desc" : "asc"}`),
+          .map((column) =>
+            column.name === null
+              ? `expr:${normalizeIndexExpression(terms[column.seqno] ?? "")}:${column.desc ? "desc" : "asc"}`
+              : `${column.name}:${column.desc ? "desc" : "asc"}`,
+          ),
         where: where ? normalizeSQL(where) : null,
       };
     })
@@ -432,4 +463,36 @@ function migratedExplicitIndexes(
 
 function normalizeSQL(value: string): string {
   return value.replaceAll(/\s+/g, " ").trim();
+}
+
+/** Splits the top-level indexed terms of a CREATE INDEX statement. */
+function indexColumnTerms(createSQL: string): string[] {
+  const open = createSQL.search(/\sON\s+\S+\s*\(/i);
+  assert.ok(open !== -1, `unparseable index: ${createSQL}`);
+  const start = createSQL.indexOf("(", open) + 1;
+  const terms: string[] = [];
+  let depth = 0;
+  let quoted = false;
+  let term = "";
+  for (let index = start; index < createSQL.length; index += 1) {
+    const character = createSQL[index];
+    if (character === "'") quoted = !quoted;
+    if (!quoted && character === "(") depth += 1;
+    if (!quoted && character === ")") {
+      if (depth === 0) break;
+      depth -= 1;
+    }
+    if (!quoted && depth === 0 && character === ",") {
+      terms.push(term);
+      term = "";
+      continue;
+    }
+    term += character;
+  }
+  terms.push(term);
+  return terms.map((value) => value.trim());
+}
+
+function normalizeIndexExpression(value: string): string {
+  return normalizeSQL(value).replaceAll('"', "").toLowerCase();
 }

@@ -14,6 +14,7 @@ const migrations = [
   "migrations/0008_circle_tag_overlays.sql",
   "migrations/0009_crawler_realtime_snapshots.sql",
   "migrations/0010_shinagaki_analysis.sql",
+  "migrations/0011_catalog_identity.sql",
 ];
 
 test("provider-neutral migration preserves every existing user-dependent row in a D1 transaction", () => {

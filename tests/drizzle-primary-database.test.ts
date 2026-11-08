@@ -11,9 +11,9 @@ import { migratedTables } from "../src/lib/db/schema";
 const homepageRoot = fileURLToPath(new URL("../", import.meta.url));
 const nativeBatchBridge = "src/lib/db/batch.ts";
 
-test("the authoritative Drizzle manifest keeps all 82 final D1 tables under parity coverage", async () => {
-  assert.equal(Object.keys(migratedTables).length, 82);
-  assert.equal(new Set(Object.keys(migratedTables)).size, 82);
+test("the authoritative Drizzle manifest keeps all 87 final D1 tables under parity coverage", async () => {
+  assert.equal(Object.keys(migratedTables).length, 87);
+  assert.equal(new Set(Object.keys(migratedTables)).size, 87);
 
   const parityTest = await readFile(
     join(homepageRoot, "tests/drizzle-schema.test.ts"),
@@ -35,6 +35,7 @@ test("the authoritative Drizzle manifest keeps all 82 final D1 tables under pari
     "0008",
     "0009",
     "0010",
+    "0011",
   ]) {
     assert.match(
       parityTest,

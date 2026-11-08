@@ -1062,6 +1062,12 @@ function setup(): SQLiteD1Database {
       "migrations/0003_accounts_shared_plans.sql",
       "migrations/0004_sanitized_catalog.sql",
       "migrations/0005_shared_plan_crdt_notifications.sql",
+      "migrations/0006_notification_inbox.sql",
+      "migrations/0007_catalog_genres_all_days.sql",
+      "migrations/0008_circle_tag_overlays.sql",
+      "migrations/0009_crawler_realtime_snapshots.sql",
+      "migrations/0010_shinagaki_analysis.sql",
+      "migrations/0011_catalog_identity.sql",
     ]
       .map((path) => readFileSync(path, "utf8"))
       .join("\n"),
