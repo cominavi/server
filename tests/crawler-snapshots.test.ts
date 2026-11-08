@@ -558,6 +558,97 @@ test("a reset caps its post-publication delta tail at one page and stays a singl
   );
 });
 
+test("a client that follows only the afterCursor feed converges after a capped reset", async () => {
+  const database = setup();
+  seedCatalog(database);
+  seedLegacyUpdates(database);
+  const bucket = new MemoryBucket();
+  const publication = await fixturePublication();
+  const { publishCrawlerSnapshot } =
+    await import("../src/lib/server/crawler-snapshots");
+  const published = await publishCrawlerSnapshot(
+    database.binding,
+    bucket.binding,
+    auth(publication, "snapshot:c108:g1:converging-reset"),
+  );
+  // More than two incremental pages after the reset page.
+  const tail = incrementalPageSize * 3 + 3;
+  seedPostPublicationPresenceRun(database, published.publicationCursor, tail);
+
+  const app = createHomepageApp(() => new Response("astro"));
+  type Update = { eventKey: string; cursor: number };
+  type Page = {
+    hasMore: boolean;
+    resetRequired: boolean;
+    publicationRevision: string;
+    publicationCursor: number;
+    updates: Update[];
+  };
+  const fetchPage = async (query: string): Promise<Page> => {
+    const response = await app.fetch(
+      new Request(`https://cominavi.net/api/v2/events/108/updates${query}`),
+      environment(database, bucket),
+      executionContext,
+    );
+    assert.equal(response.status, 200);
+    return response.json<Page>();
+  };
+
+  // Client: the shipped protocol only. A reset page replaces state and must
+  // not have hasMore; every later page continues from the last cursor.
+  let revision = "none";
+  let cursor = 0;
+  let state = new Map<string, Update>();
+  let requests = 0;
+  for (let revalidation = 0; revalidation < 10; revalidation += 1) {
+    let page: Page;
+    do {
+      page = await fetchPage(
+        `?afterCursor=${cursor}&publicationRevision=${revision}`,
+      );
+      requests += 1;
+      if (page.resetRequired) {
+        assert.equal(page.hasMore, false);
+        assert.ok(
+          page.updates.every(
+            (update) => update.cursor >= page.publicationCursor,
+          ),
+        );
+        state = new Map();
+        revision = page.publicationRevision;
+        cursor = page.publicationCursor;
+      } else {
+        assert.equal(page.publicationRevision, revision);
+        assert.ok(page.updates.every((update) => update.cursor > cursor));
+      }
+      for (const update of page.updates) state.set(update.eventKey, update);
+      cursor = page.updates.at(-1)?.cursor ?? cursor;
+    } while (page.hasMore);
+    if (page.updates.length === 0) break;
+  }
+
+  // Reference: the uncapped query-free representation of the same feed.
+  const reference = await fetchPage("");
+  assert.equal(reference.hasMore, false);
+  assert.equal(
+    reference.updates.filter(
+      (update) => update.cursor > published.publicationCursor,
+    ).length,
+    tail,
+  );
+  assert.deepEqual(
+    state,
+    new Map(reference.updates.map((update) => [update.eventKey, update])),
+  );
+  assert.equal(cursor, published.publicationCursor + tail);
+  // One capped reset page, then the paged feed: ceil((tail - 500) / 500)
+  // pages in the second revalidation plus a final empty check.
+  assert.equal(
+    requests,
+    1 + Math.ceil((tail - incrementalPageSize) / incrementalPageSize) + 1,
+  );
+});
+
 test("signed authority and raw catalog source are operation-bound and no-store", async () => {
   const database = setup();
   seedCatalog(database);
