@@ -1,6 +1,7 @@
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import * as Sentry from "@sentry/hono/cloudflare";
 import { Hono } from "hono";
+import { logger } from "hono/logger";
 import type { Context } from "hono";
 import { generateOpenAPIDocument } from "./openapi";
 import { apiRouter } from "./router";
@@ -130,6 +131,12 @@ export function createHomepageApp(astroFetch: AstroFetch) {
   const app = new Hono<{ Bindings: Cloudflare.Env }>();
 
   app.use(Sentry.sentry(app, createHomepageSentryOptions()));
+  // Local `pnpm dev` only: print one line per request so app and agent runs
+  // against a local server are observable. Production builds never run it,
+  // and plain Node tests (no Vite env) skip it.
+  if (import.meta.env?.DEV) {
+    app.use(logger());
+  }
 
   app.get("/api/openapi.json", async (context) => {
     return context.json(await generateOpenAPIDocument(), 200, {
