@@ -27,9 +27,24 @@ export interface AuthenticatedCatalogPublisherRequest {
   signerScope: "manual" | "scheduled";
 }
 
+/**
+ * How the transport layer may cache a successful JSON response.
+ * - `no-store`: never cached (the default when a handler declares nothing).
+ * - `public-realtime`: shared, short-lived realtime feed caching with a
+ *   strong body ETag. Applied only to a canonical realtime updates URL.
+ */
+export type ResponseCachePolicy = "no-store" | "public-realtime";
+
+/** Typed response facts a handler reports to the transport layer. */
+export interface ResponseMetadata {
+  cachePolicy?: ResponseCachePolicy;
+}
+
 export interface APIContext {
   request: Request;
   env: Cloudflare.Env;
+  /** Present when served through the Worker transport; handlers write to it. */
+  responseMetadata?: ResponseMetadata;
   authenticatedCrawlerRequest?:
     AuthenticatedCrawlerRawRequest | AuthenticatedCrawlerRequest;
   authenticatedCatalogPublisherRequest?: AuthenticatedCatalogPublisherRequest;
