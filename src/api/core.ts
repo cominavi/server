@@ -6,6 +6,7 @@ import {
   type CominaviIdentity,
 } from "../lib/server/cominavi-auth";
 import { authenticateRequestWithBindings } from "../lib/server/authenticated-request-core";
+import { assertCatalogReader } from "../lib/server/catalog-access";
 import { FollowingImportError } from "../lib/server/following-import";
 import { ServiceError } from "../lib/server/service-error";
 import type { CrawlerBatch } from "../lib/server/crawler-ingest";
@@ -212,6 +213,17 @@ export const publicProcedure = baseProcedure.use(publicSecurity);
 export const authenticatedProcedure = baseProcedure
   .use(bearerSecurity)
   .use(requireAuthentication);
+
+/**
+ * A bearer-authenticated procedure that serves production catalog data.
+ * Sessions whose only identities are Circle.ms sandbox identities are refused.
+ */
+export const catalogReaderProcedure = authenticatedProcedure.use(
+  async ({ context, next }) => {
+    await assertCatalogReader(context.env.COMINAVI_DB, context.identity.userID);
+    return next();
+  },
+);
 
 /**
  * A bearer-authenticated operation that validates its own authority semantics.
