@@ -151,7 +151,9 @@ pnpm mirror:import --bundle ../mirror-bundle --target staging
 
 What it copies: catalog events, editions, capabilities and provider aliases;
 published and superseded version metadata; the normalized rows and the
-derived (client-download) artifact of each **active** version; stable and
+derived (client-download) artifact of each **active** version, plus the
+normalized rows of any superseded version a current tag overlay is still bound
+to; stable and
 edition circles; the current tag-overlay and crawler-snapshot heads with their
 objects. Object metadata is rebuilt from the D1 rows, and every object's
 SHA-256 and size are checked against its row on export and import.
@@ -195,7 +197,8 @@ Safety:
   it. The snapshot generation is part of the canonical object and is never
   rewritten: if the target already has a different snapshot at the same
   generation (its own history), that event's snapshot is skipped with a
-  warning and the rest of the bundle still imports. Re-importing the same
+  warning and the rest of the bundle still imports. An older bundle never moves a snapshot head back to a lower generation.
+  Re-importing the same
   snapshot keeps its original fence.
 - Export reads are not one transaction. If production publishes a catalog
   between two reads, the export notices the inconsistent snapshot and reads

@@ -305,13 +305,53 @@ async function exportPublishedDataOnce(
   }
 
   const objects: MirrorObject[] = [];
-  for (const versionID of activeVersionIDs) {
-    log(`catalog version ${versionID}`);
-    const artifacts = await all(
-      "catalog_artifacts",
-      "version_id = ? AND kind = 'derived_catalog' AND visibility = 'authenticated_download'",
-      [versionID],
+  for (const head of await all("circle_tag_overlay_heads")) {
+    const [version] = await all(
+      "circle_tag_overlay_versions",
+      "event_number = ? AND revision = ?",
+      [Number(head.event_number), String(head.revision)],
     );
+    if (!version || !versionIDs.has(String(version.catalog_version_id))) {
+      continue;
+    }
+    add("circle_tag_overlay_versions", [version]);
+    add("circle_tag_overlay_heads", [head]);
+    objects.push({
+      bucket: "catalogs",
+      key: String(version.object_key),
+      sha256: String(version.object_sha256),
+      bytes: Number(version.byte_count),
+      contentType: tagOverlayContentType,
+      customMetadata: {
+        schemaVersion: "1",
+        sha256: String(version.object_sha256),
+        revision: String(version.revision),
+        eventNumber: String(version.event_number),
+        catalogPayloadSHA256: String(version.catalog_payload_sha256),
+        visibility: "tag_overlay",
+      },
+    });
+  }
+
+  // A tag overlay may stay bound to a superseded version after an image-only
+  // catalog rotation (same main payload and circle set). Its circle set is the
+  // evidence the overlay reader checks, so those versions' normalized rows are
+  // mirrored too; only active versions get their downloadable artifact.
+  const overlayVersionIDs = (
+    rowsByTable.get("circle_tag_overlay_versions") ?? []
+  ).map((row) => String(row.catalog_version_id));
+  const normalizedVersionIDs = [
+    ...new Set([...activeVersionIDs, ...overlayVersionIDs]),
+  ].sort();
+  for (const versionID of normalizedVersionIDs) {
+    log(`catalog version ${versionID}`);
+    const artifacts = !activeVersionIDs.includes(versionID)
+      ? []
+      : await all(
+          "catalog_artifacts",
+          "version_id = ? AND kind = 'derived_catalog' AND visibility = 'authenticated_download'",
+          [versionID],
+        );
     add("catalog_artifacts", artifacts);
     for (const artifact of artifacts) {
       objects.push({
@@ -347,34 +387,6 @@ async function exportPublishedDataOnce(
         versionIDs.has(String(row.last_version_id)),
     ),
   );
-
-  for (const head of await all("circle_tag_overlay_heads")) {
-    const [version] = await all(
-      "circle_tag_overlay_versions",
-      "event_number = ? AND revision = ?",
-      [Number(head.event_number), String(head.revision)],
-    );
-    if (!version || !versionIDs.has(String(version.catalog_version_id))) {
-      continue;
-    }
-    add("circle_tag_overlay_versions", [version]);
-    add("circle_tag_overlay_heads", [head]);
-    objects.push({
-      bucket: "catalogs",
-      key: String(version.object_key),
-      sha256: String(version.object_sha256),
-      bytes: Number(version.byte_count),
-      contentType: tagOverlayContentType,
-      customMetadata: {
-        schemaVersion: "1",
-        sha256: String(version.object_sha256),
-        revision: String(version.revision),
-        eventNumber: String(version.event_number),
-        catalogPayloadSHA256: String(version.catalog_payload_sha256),
-        visibility: "tag_overlay",
-      },
-    });
-  }
 
   for (const head of await all("crawler_snapshot_heads")) {
     const [version] = await all(
@@ -666,7 +678,8 @@ export async function importBundle(
  *   skipped with a warning and the target keeps its own; everything else
  *   still imports.
  * - Re-importing the head's current revision changes nothing, so its fence is
- *   kept; only a new revision moves the head.
+ *   kept; only a new revision with a HIGHER generation moves the head. An
+ *   older bundle never rolls the head back.
  */
 async function snapshotStatements(
   database: D1Database,
@@ -721,7 +734,8 @@ async function snapshotStatements(
            "publication_cursor" = excluded."publication_cursor",
            "publication_idempotency_key" = excluded."publication_idempotency_key",
            "updated_at" = excluded."updated_at"
-         WHERE "crawler_snapshot_heads"."revision" IS NOT excluded."revision"`,
+         WHERE "crawler_snapshot_heads"."revision" IS NOT excluded."revision"
+           AND excluded."generation" > "crawler_snapshot_heads"."generation"`,
       ),
     );
   }

@@ -755,3 +755,67 @@ test("an export that races a production publication is read again", async () => 
     "c108-v4",
   );
 });
+
+test("a tag overlay bound to a superseded version keeps its circle-set evidence", async () => {
+  const { production, source, staging, target, bundle } = setup();
+  production.native.exec(
+    "UPDATE circle_tag_overlay_versions SET catalog_version_id = 'c108-v1'",
+  );
+  await exportPublishedData(source, bundle);
+  await importBundle(bundle, target);
+  assert.equal(
+    count(
+      staging,
+      "SELECT COUNT(*) AS n FROM catalog_circles WHERE version_id = 'c108-v1'",
+    ),
+    1,
+  );
+  assert.equal(
+    count(
+      staging,
+      "SELECT COUNT(*) AS n FROM catalog_artifacts WHERE version_id = 'c108-v1'",
+    ),
+    0,
+    "only active versions get a downloadable artifact",
+  );
+  assert.equal(
+    count(staging, "SELECT COUNT(*) AS n FROM circle_tag_overlay_heads"),
+    1,
+  );
+});
+
+test("importing an older bundle never rolls a snapshot head backward", async () => {
+  const { production, sourceBuckets, source, staging, target, bundle } =
+    setup();
+  const older = mkdtempSync(join(tmpdir(), "cominavi-mirror-older-"));
+  await exportPublishedData(source, older);
+
+  const nextRevision = sha("snapshot-revision-2");
+  const nextKey = `crawler-realtime/v1/events/108/sha256/${nextRevision}.json`;
+  const nextBytes = new TextEncoder().encode('{"snapshot":2}');
+  sourceBuckets.catalogs.objects.set(nextKey, {
+    bytes: nextBytes,
+    customMetadata: {},
+  });
+  production.native.exec(`
+    INSERT INTO crawler_snapshot_versions (
+      event_number, revision, schema_version, generation, catalog_payload_sha256,
+      matching_policy_revision, observed_at, update_count, object_key,
+      object_sha256, byte_count, publication_cursor, published_at
+    ) VALUES (
+      108, '${nextRevision}', 1, 2, '${"8".repeat(64)}', 'match-1', 7, 0,
+      '${nextKey}', '${sha(nextBytes)}', ${nextBytes.byteLength}, 0, 7
+    );
+    UPDATE crawler_snapshot_heads
+      SET revision = '${nextRevision}', generation = 2,
+          publication_idempotency_key = 'snapshot-publication-2', updated_at = 7;
+  `);
+  await exportPublishedData(source, bundle);
+  await importBundle(bundle, target);
+  await importBundle(older, target);
+
+  const head = staging.native
+    .prepare("SELECT revision, generation FROM crawler_snapshot_heads")
+    .get() as { revision: string; generation: number };
+  assert.deepEqual({ ...head }, { revision: nextRevision, generation: 2 });
+});
