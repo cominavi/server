@@ -84,8 +84,8 @@ namespace and rate limiter need no creation step.
 npx wrangler d1 migrations apply COMINAVI_DB -c wrangler.jsonc --env staging --remote
 ```
 
-Catalog and overlay data come from the production→staging mirror tool, not
-from the committed seed.
+Catalog and overlay data come from the production→staging mirror tool
+(below), not from the committed seed.
 
 ### 3. Secrets
 
@@ -130,6 +130,56 @@ pnpm deploy:staging
 The custom-domain route creates the `staging.cominavi.net` record in the
 `cominavi.net` zone on first deploy. Check it with
 `curl -sI https://staging.cominavi.net/api/openapi.json`.
+
+## Production → staging mirror
+
+`tools/mirror-published-data.ts` copies **published, sanitized** catalog and
+overlay data one way, from production into staging or a local dev server
+(proposal §7, Q9). It replaces the committed C108 seed and the review-demo
+cherry-pick for local work.
+
+```sh
+# 1. Export from production (read-only) into a local bundle directory.
+COMINAVI_MIRROR_SOURCE_API_TOKEN=... pnpm mirror:export --out ../mirror-bundle
+
+# 2a. Import into local dev state (after `wrangler d1 migrations apply --local`).
+pnpm mirror:import --bundle ../mirror-bundle --target local
+
+# 2b. Or import into staging (after its migrations are applied).
+pnpm mirror:import --bundle ../mirror-bundle --target staging
+```
+
+What it copies: catalog events, editions, capabilities and provider aliases;
+published and superseded version metadata; the normalized rows and the
+derived (client-download) artifact of each **active** version; stable and
+edition circles; the current tag-overlay and crawler-snapshot heads with their
+objects. Object metadata is rebuilt from the D1 rows, and every object's
+SHA-256 and size are checked against its row on export and import.
+
+What it never copies: raw Circle.ms source files (`raw/…`, `private_source`
+artifacts), users, identities, sessions, tokens, favorites, Shared Plans,
+devices, notifications, receipts, jobs, or any table not listed above.
+
+Safety:
+
+- **Export** talks to the Cloudflare REST API with
+  `COMINAVI_MIRROR_SOURCE_API_TOKEN`: one D1 `query` endpoint for SELECTs and
+  R2 object GETs. The tool refuses any SQL that is not a single `SELECT` and
+  any non-GET object request. Give it a dedicated token with the least
+  privilege the API accepts: Workers R2 Storage Read, plus D1 access for the
+  `cominavi` database. If Cloudflare requires D1 Edit for the query endpoint,
+  the tool still never issues a write.
+- **Import** writes through Worker bindings (`getPlatformProxy`): local
+  miniflare state for `local`, or remote bindings to exactly the staging D1
+  and the two staging catalog buckets for `staging`. It refuses a target that
+  shares a Worker name, database name or ID, or bucket name with production,
+  and refuses the zero placeholder database ID. Staging import uses the
+  operator's Wrangler auth (`wrangler login` or `CLOUDFLARE_API_TOKEN`).
+- Both steps are idempotent: objects already present with the same size,
+  content type and metadata are skipped; rows use `INSERT OR IGNORE`; the
+  pointers that follow production (event active version, editions,
+  capabilities, aliases, stable/edition circles, overlay heads) are upserted
+  only when they differ. Target-only rows are never deleted.
 
 ## Known production-pinned values
 

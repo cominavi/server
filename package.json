@@ -13,6 +13,8 @@
     "catalog:import": "tsx tools/catalog-import.ts",
     "catalog:publish": "tsx tools/publish-catalog.ts",
     "catalog:refresh": "tsx tools/run-catalog-refresh.ts",
+    "mirror:export": "tsx tools/mirror-published-data.ts export",
+    "mirror:import": "tsx tools/mirror-published-data.ts import",
     "openapi:generate": "tsx tools/generate-openapi.ts --output openapi/cominavi-openapi.json",
     "openapi:check": "tsx tools/generate-openapi.ts --output openapi/cominavi-openapi.json --check",
     "fixture:automerge": "tsx tools/generate-automerge-v1-fixture.ts --write",
