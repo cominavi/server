@@ -2,10 +2,33 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { unstable_readConfig } from "wrangler";
 
+// The subset of the resolved Wrangler config these tests compare.
+interface EnvironmentConfig {
+  name?: string;
+  routes?: Array<string | { pattern: string }>;
+  vars: Record<string, unknown>;
+  d1_databases: Array<{
+    binding: string;
+    database_name?: string;
+    database_id?: string;
+  }>;
+  kv_namespaces: Array<{ binding: string; id?: string }>;
+  r2_buckets: Array<{ binding: string; bucket_name?: string }>;
+  durable_objects: { bindings: Array<{ name: string }> };
+  queues: {
+    producers?: Array<{ binding: string; queue: string }>;
+    consumers?: Array<{ queue: string; dead_letter_queue?: string }>;
+  };
+  ratelimits: Array<{ name: string; namespace_id: string }>;
+}
+
 // Read wrangler.jsonc directly (never the redirected build output), so the
 // assertions hold no matter which environment was built last.
-function readEnvironment(env?: string) {
-  return unstable_readConfig({ config: "wrangler.jsonc", env });
+function readEnvironment(env?: string): EnvironmentConfig {
+  return unstable_readConfig({
+    config: "wrangler.jsonc",
+    env,
+  }) as unknown as EnvironmentConfig;
 }
 
 const production = readEnvironment();
@@ -34,7 +57,7 @@ test("staging is a separate Worker on staging.cominavi.net", () => {
 });
 
 test("staging declares every production binding and shares no resource", () => {
-  const bindingNames = (config: typeof production) =>
+  const bindingNames = (config: EnvironmentConfig) =>
     [
       ...config.d1_databases.map((database) => database.binding),
       ...config.kv_namespaces.map((namespace) => namespace.binding),
@@ -46,7 +69,7 @@ test("staging declares every production binding and shares no resource", () => {
     ].sort();
   assert.deepEqual(bindingNames(staging), bindingNames(production));
 
-  const resources = (config: typeof production) => [
+  const resources = (config: EnvironmentConfig) => [
     ...config.d1_databases.flatMap((database) => [
       database.database_name,
       database.database_id,
