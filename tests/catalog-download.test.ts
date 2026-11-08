@@ -202,6 +202,10 @@ function setupPublishedCatalog(): SQLiteD1Database {
       1, '0123456789abcdef0123456789abcdef', 'Catalog User', 1, NULL,
       1, 1, 1
     );
+    INSERT INTO user_identities (
+      user_id, provider, provider_environment, provider_subject,
+      provider_user_id, created_at, updated_at, last_authenticated_at
+    ) VALUES (1, 'circlems', 'production', '1001', 1001, 1, 1, 1);
     INSERT INTO catalog_events (comiket_no, name, active_version_id, created_at, updated_at)
     VALUES (108, 'Comic Market 108', '${versionID}', 1, 1);
     INSERT INTO catalog_versions (

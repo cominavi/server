@@ -177,6 +177,81 @@ test("catalog oRPC routes list manifests and preserve resumable artifact behavio
   ]);
 });
 
+test("catalog oRPC routes refuse sessions whose only identities are Circle.ms sandbox", async () => {
+  const database = setupPublishedCatalog();
+  database.native.exec(`
+    INSERT INTO users (
+      id, public_id, display_name, auth_version, deletion_pending_at,
+      created_at, updated_at, last_authenticated_at
+    ) VALUES
+      (2, '${"2".repeat(32)}', 'Sandbox User', 1, NULL, 1, 1, 1),
+      (3, '${"3".repeat(32)}', 'Sandbox + Google User', 1, NULL, 1, 1, 1),
+      (4, '${"4".repeat(32)}', 'Google User', 1, NULL, 1, 1, 1);
+    INSERT INTO user_identities (
+      user_id, provider, provider_environment, provider_subject,
+      provider_user_id, created_at, updated_at, last_authenticated_at
+    ) VALUES
+      (2, 'circlems', 'sandbox', '2001', 2001, 1, 1, 1),
+      (2, 'circlems', 'sandbox', '2002', 2002, 1, 1, 1),
+      (3, 'circlems', 'sandbox', '3001', 3001, 1, 1, 1),
+      (3, 'google', '', 'google-3', NULL, 1, 1, 1),
+      (4, 'google', '', 'google-4', NULL, 1, 1, 1);
+  `);
+  const bucket = new RangeBucket(bytes);
+  const handler = new OpenAPIHandler(catalogsRouter, {
+    customErrorResponseBodyEncoder: canonicalErrorResponseBody,
+  });
+  const environment = {
+    COMINAVI_DB: database.binding,
+    COMINAVI_CATALOG_DOWNLOADS: bucket.binding,
+    COMINAVI_JWT_SECRET: secret,
+  } as unknown as Cloudflare.Env;
+  const fetchAs = async (userID: number, path: string, method = "GET") => {
+    const token = await issueCominaviJWT(
+      { subject: String(userID).repeat(32), userID, authVersion: 1 },
+      secret,
+    );
+    const request = new Request(`https://cominavi.net${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${token.token}` },
+    });
+    const result = await handler.handle(request, {
+      context: { request, env: environment },
+    });
+    if (!result.matched) throw new Error("catalog route did not match");
+    return result.response;
+  };
+  const artifactPath = `/api/v2/catalogs/108/versions/${versionID}/artifact`;
+  const routes: Array<[string, string]> = [
+    ["GET", "/api/v2/catalogs"],
+    ["GET", "/api/v2/catalogs/108"],
+    ["GET", artifactPath],
+    ["HEAD", artifactPath],
+  ];
+
+  for (const [method, path] of routes) {
+    const refused = await fetchAs(2, path, method);
+    assert.equal(refused.status, 403, `${method} ${path}`);
+    if (method === "GET") {
+      assert.deepEqual(await refused.json(), {
+        error: "catalog_access_denied",
+        message: "Circle.ms sandbox accounts cannot read production catalogs.",
+      });
+    }
+    for (const allowedUser of [3, 4]) {
+      const allowed = await fetchAs(allowedUser, path, method);
+      assert.equal(
+        allowed.status,
+        200,
+        `${method} ${path} user ${allowedUser}`,
+      );
+      await allowed.arrayBuffer();
+    }
+  }
+  assert.equal(bucket.requests.length, 2);
+  assert.equal(bucket.heads, 2);
+});
+
 function setupPublishedCatalog(): SQLiteD1Database {
   const database = new SQLiteD1Database(
     [
@@ -197,6 +272,10 @@ function setupPublishedCatalog(): SQLiteD1Database {
       1, '0123456789abcdef0123456789abcdef', 'Catalog User', 1, NULL,
       1, 1, 1
     );
+    INSERT INTO user_identities (
+      user_id, provider, provider_environment, provider_subject,
+      provider_user_id, created_at, updated_at, last_authenticated_at
+    ) VALUES (1, 'circlems', 'production', '1001', 1001, 1, 1, 1);
     INSERT INTO catalog_events (
       comiket_no, name, active_version_id, created_at, updated_at
     ) VALUES (108, 'Comic Market 108', '${versionID}', 1, 1);

@@ -6,7 +6,7 @@ import {
 } from "../../lib/server/catalogs";
 import { serveCatalogArtifact } from "../../lib/server/catalog-download";
 import { ServiceError } from "../../lib/server/service-error";
-import { authenticatedProcedure, serviceErrorDataSchema } from "../core";
+import { catalogReaderProcedure, serviceErrorDataSchema } from "../core";
 
 const catalogContentType = "application/vnd.cominavi.catalog-v1+sqlite";
 const catalogVersionIDSchema = z
@@ -123,7 +123,7 @@ const binaryContent = {
   },
 } as const;
 
-export const listCatalogIndex = authenticatedProcedure
+export const listCatalogIndex = catalogReaderProcedure
   .route({
     method: "GET",
     path: "/api/v2/catalogs",
@@ -141,7 +141,7 @@ export const listCatalogIndex = authenticatedProcedure
     ),
   }));
 
-export const getCatalogManifest = authenticatedProcedure
+export const getCatalogManifest = catalogReaderProcedure
   .route({
     method: "GET",
     path: "/api/v2/catalogs/{comiketNo}",
@@ -163,7 +163,7 @@ export const getCatalogManifest = authenticatedProcedure
     ),
   );
 
-export const downloadCatalogArtifact = authenticatedProcedure
+export const downloadCatalogArtifact = catalogReaderProcedure
   .errors(rangeErrorMap)
   .route({
     method: "GET",
@@ -257,7 +257,7 @@ export const downloadCatalogArtifact = authenticatedProcedure
     throw invalidArtifactResponse(response.status);
   });
 
-export const headCatalogArtifact = authenticatedProcedure
+export const headCatalogArtifact = catalogReaderProcedure
   .route({
     method: "HEAD",
     path: "/api/v2/catalogs/{comiketNo}/versions/{versionID}/artifact",
