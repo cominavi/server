@@ -183,6 +183,7 @@ function cloudflareAPI(
   database: SQLiteD1Database,
   buckets: ReturnType<typeof productionBuckets>,
   calls: string[],
+  queries: string[],
 ) {
   return async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
@@ -197,6 +198,7 @@ function cloudflareAPI(
         sql: string;
         params: Array<string | number>;
       };
+      queries.push(sql);
       const results = database.native.prepare(sql).all(...params);
       return Response.json({
         success: true,
@@ -222,12 +224,18 @@ function setup() {
   seedProduction(production);
   const sourceBuckets = productionBuckets();
   const calls: string[] = [];
+  const queries: string[] = [];
   const source = new CloudflareAPISource({
     accountID: "account",
     databaseID: "prod-db",
     buckets: { downloads: "prod-downloads", catalogs: "prod-catalogs" },
     token: "read-only-token",
-    fetch: cloudflareAPI(production, sourceBuckets, calls) as typeof fetch,
+    fetch: cloudflareAPI(
+      production,
+      sourceBuckets,
+      calls,
+      queries,
+    ) as typeof fetch,
   });
   const staging = new SQLiteD1Database(migrations);
   const targetBuckets = {
@@ -247,6 +255,7 @@ function setup() {
     sourceBuckets,
     source,
     calls,
+    queries,
     staging,
     targetBuckets,
     target,
@@ -258,7 +267,7 @@ const count = (database: SQLiteD1Database, sql: string) =>
   (database.native.prepare(sql).get() as { n: number }).n;
 
 test("export reads production with SELECTs and GETs only and never touches raw or user data", async () => {
-  const { source, calls, bundle } = setup();
+  const { source, calls, queries, bundle } = setup();
   const manifest = await exportPublishedData(source, bundle);
 
   assert.ok(calls.length > 0);
@@ -276,7 +285,21 @@ test("export reads production with SELECTs and GETs only and never touches raw o
   const tables = new Map(
     manifest.tables.map((table) => [table.table, table.rows]),
   );
-  assert.ok(!tables.has("users") && !tables.has("user_identities"));
+  for (const sql of queries) {
+    assert.match(
+      sql,
+      /^SELECT \* FROM "(catalog_|circle_tag_overlay_|crawler_snapshot_)/,
+      sql,
+    );
+    assert.doesNotMatch(sql, /users|identit|session|token|favorite|plan/i, sql);
+  }
+  assert.ok(
+    readdirSync(join(bundle, "rows")).every((name) =>
+      /^(catalog_|circle_tag_overlay_|crawler_snapshot_)[a-z_]+\.ndjson$/.test(
+        name,
+      ),
+    ),
+  );
   assert.equal(tables.get("catalog_artifacts"), 1, "only the derived artifact");
   assert.equal(tables.get("catalog_versions"), 2, "published + superseded");
   assert.equal(tables.get("catalog_circles"), 2, "active version rows only");
@@ -464,4 +487,76 @@ test("the import target can never be a production resource", async () => {
     ...staging,
     databaseID: "11111111-1111-1111-1111-111111111111",
   });
+});
+
+test("snapshot cursors are rebased onto the target's own append log", async () => {
+  const { production, source, staging, target, bundle } = setup();
+  production.native.exec(`
+    UPDATE crawler_snapshot_versions SET publication_cursor = 1000;
+    UPDATE crawler_snapshot_heads SET publication_cursor = 1000;
+  `);
+  await exportPublishedData(source, bundle);
+  await importBundle(bundle, target);
+  for (const table of ["crawler_snapshot_versions", "crawler_snapshot_heads"]) {
+    assert.equal(
+      count(staging, `SELECT MAX(publication_cursor) AS n FROM ${table}`),
+      0,
+      table,
+    );
+  }
+});
+
+test("a failed import never activates a catalog whose rows are missing", async () => {
+  const { source, staging, target, bundle } = setup();
+  await exportPublishedData(source, bundle);
+  staging.native.exec(`
+    CREATE TRIGGER refuse_circles BEFORE INSERT ON catalog_circles
+    BEGIN SELECT RAISE(ABORT, 'simulated outage'); END;
+  `);
+  await assert.rejects(importBundle(bundle, target), /simulated outage/);
+  const active = () =>
+    (
+      staging.native
+        .prepare(
+          "SELECT active_version_id AS id FROM catalog_events WHERE comiket_no = 108",
+        )
+        .get() as { id: string | null }
+    ).id;
+  assert.equal(active(), null);
+
+  staging.native.exec("DROP TRIGGER refuse_circles");
+  await importBundle(bundle, target);
+  assert.equal(active(), "c108-v2");
+});
+
+test("an alias retirement and its live replacement mirror in one import", async () => {
+  const { production, source, staging, target, bundle } = setup();
+  const alias = (value: string, createdAt: number) => `
+    INSERT INTO catalog_provider_aliases (
+      provider, provider_environment, alias_kind, alias_scope, alias_value,
+      catalog_event_key, circle_key, created_at, retired_at
+    ) VALUES ('circlems', 'production', 'circlems_event_id', '', '${value}',
+              'comiket-108', NULL, ${createdAt}, NULL);`;
+  production.native.exec(alias("999", 1));
+  await exportPublishedData(source, bundle);
+  await importBundle(bundle, target);
+
+  production.native.exec(
+    `UPDATE catalog_provider_aliases SET retired_at = 5 WHERE alias_value = '999';` +
+      alias("100", 5),
+  );
+  await exportPublishedData(source, bundle);
+  await importBundle(bundle, target);
+  assert.deepEqual(
+    staging.native
+      .prepare(
+        "SELECT alias_value, retired_at FROM catalog_provider_aliases ORDER BY alias_value",
+      )
+      .all()
+      .map((row) => ({ ...row })),
+    [
+      { alias_value: "100", retired_at: null },
+      { alias_value: "999", retired_at: 5 },
+    ],
+  );
 });

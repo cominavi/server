@@ -13,10 +13,13 @@
  * `import` writes a bundle through real Worker bindings (`getPlatformProxy`):
  * the local dev state for `--target local`, or the remote `env.staging`
  * resources for `--target staging`. It refuses any target that names a
- * production resource. Rows use INSERT OR IGNORE, except the few pointers
- * (event active version, overlay heads) that follow production. Objects are
- * skipped when an identical object is already present. Running either step
- * twice is a no-op.
+ * production resource. Immutable rows (artifacts, normalized catalog rows,
+ * overlay and snapshot versions) use INSERT OR IGNORE. Rows whose state can
+ * change in production (events, editions, capabilities, aliases, versions,
+ * stable and edition circles, overlay and snapshot heads) are upserted when a
+ * column differs. Event activation is applied last, so a target never points
+ * at a version whose rows are not all imported. Objects are skipped when an
+ * identical object is already present. Running either step twice is a no-op.
  *
  * What is mirrored: catalog events, editions, capabilities, provider aliases,
  * published/superseded version metadata, the normalized rows and the derived
@@ -342,6 +345,12 @@ export async function exportPublishedData(
       [Number(head.event_number), String(head.revision)],
     );
     if (!version) continue;
+    // `publication_cursor` is a position in production's realtime append log
+    // (`circle_update_events`), which is not mirrored. In the target's own log
+    // the snapshot covers nothing yet, so the cursor is 0; carrying the
+    // production value would hide the target's first events.
+    version.publication_cursor = 0;
+    head.publication_cursor = 0;
     add("crawler_snapshot_versions", [version]);
     add("crawler_snapshot_heads", [head]);
     objects.push({
@@ -488,9 +497,10 @@ export async function importBundle(
   }
 
   let insertedRows = 0;
+  const activations: Row[] = [];
   for (const table of manifest.tables) {
     if (table.rows === 0) continue;
-    const rows = readFileSync(
+    let rows = readFileSync(
       join(bundleDir, "rows", `${table.table}.ndjson`),
       "utf8",
     )
@@ -499,6 +509,22 @@ export async function importBundle(
       .map((line) => JSON.parse(line) as Row);
     if (rows.length !== table.rows) {
       throw new Error(`Row count mismatch for ${table.table}.`);
+    }
+    if (table.table === "catalog_events") {
+      // Events are needed first (editions reference them), but activating a
+      // version must wait until its version row, artifact, and normalized rows
+      // exist. New events start inactive and existing ones keep their current
+      // version; the production pointers are applied after every table.
+      activations.push(...rows);
+      rows = rows.map(({ active_version_id: _, ...row }) => row);
+    }
+    if (table.table === "catalog_provider_aliases") {
+      // Retirements first, so a live replacement never collides with the
+      // alias it replaces on the live-target unique index.
+      rows = [...rows].sort(
+        (left, right) =>
+          Number(left.retired_at === null) - Number(right.retired_at === null),
+      );
     }
     const targetColumns = await tableColumns(target.database, table.table);
     const columns = Object.keys(rows[0]!);
@@ -520,6 +546,22 @@ export async function importBundle(
         0,
       );
     }
+  }
+  for (let start = 0; start < activations.length; start += insertBatchSize) {
+    const results = await target.database.batch(
+      activations.slice(start, start + insertBatchSize).map((event) =>
+        target.database
+          .prepare(
+            `UPDATE "catalog_events" SET "active_version_id" = ?1
+             WHERE "comiket_no" = ?2 AND "active_version_id" IS NOT ?1`,
+          )
+          .bind(event.active_version_id, event.comiket_no),
+      ),
+    );
+    insertedRows += results.reduce(
+      (sum, result) => sum + (result.meta.changes ?? 0),
+      0,
+    );
   }
   return { insertedRows, uploadedObjects };
 }

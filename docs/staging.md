@@ -176,10 +176,17 @@ Safety:
   and refuses the zero placeholder database ID. Staging import uses the
   operator's Wrangler auth (`wrangler login` or `CLOUDFLARE_API_TOKEN`).
 - Both steps are idempotent: objects already present with the same size,
-  content type and metadata are skipped; rows use `INSERT OR IGNORE`; the
-  pointers that follow production (event active version, editions,
-  capabilities, aliases, stable/edition circles, overlay heads) are upserted
-  only when they differ. Target-only rows are never deleted.
+  content type and metadata are skipped; immutable rows use
+  `INSERT OR IGNORE`; rows whose state changes in production (events,
+  editions, capabilities, aliases, version state, stable/edition circles,
+  overlay and snapshot heads) are upserted only when they differ. Target-only
+  rows are never deleted.
+- Event activation (`catalog_events.active_version_id`) is applied after every
+  other table, so a failed or partial import leaves the previous catalog
+  active. Alias retirements are applied before live replacements.
+- Crawler snapshot `publication_cursor` values point into production's
+  realtime log, which is not mirrored, so they are rebased to `0` for the
+  target's own log.
 
 ## Known production-pinned values
 
