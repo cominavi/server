@@ -12,7 +12,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-// This schema mirrors the final D1 shape after migrations 0001-0011.
+// This schema mirrors the final D1 shape after migrations 0001-0012.
 // The checked-in SQL migrations remain deployment authority; this module
 // provides the typed query surface for Worker services.
 
@@ -1729,6 +1729,172 @@ export const catalogIdentityBackfillCheckpoints = sqliteTable(
   },
 );
 
+export const curatedDecisionTypes = [
+  "x_account_attach",
+  "x_account_suppress",
+  "attendance_assert",
+  "attendance_claim_suppress",
+  "circle_identity_link",
+] as const;
+
+export const curatedDecisionReasonCodes = [
+  "report_confirmed",
+  "operator_observed",
+  "provider_data_error",
+  "false_match",
+  "impersonation_or_unofficial",
+  "circle_request",
+  "identity_resolution",
+  "legacy_label_import",
+  "other",
+] as const;
+
+export const curatedDecisions = sqliteTable(
+  "curated_decisions",
+  {
+    decisionID: text("decision_id").primaryKey(),
+    catalogEventKey: text("catalog_event_key").notNull(),
+    circleKey: text("circle_key").notNull(),
+    slot: text("slot").notNull(),
+    slotRevision: integer("slot_revision").notNull(),
+    operation: text("operation", {
+      enum: ["assert", "reverse"] as const,
+    }).notNull(),
+    decisionType: text("decision_type", {
+      enum: curatedDecisionTypes,
+    }).notNull(),
+    payloadSchemaVersion: integer("payload_schema_version").notNull(),
+    payloadJSON: text("payload_json").notNull(),
+    payloadSHA256: text("payload_sha256").notNull(),
+    actorKind: text("actor_kind", {
+      enum: ["operator", "system", "legacy_import"] as const,
+    }).notNull(),
+    actorSubject: text("actor_subject").notNull(),
+    reasonCode: text("reason_code", {
+      enum: curatedDecisionReasonCodes,
+    }).notNull(),
+    reasonText: text("reason_text").notNull(),
+    reportID: text("report_id"),
+    evidenceRefsJSON: text("evidence_refs_json").notNull(),
+    requestID: text("request_id").notNull(),
+    requestSHA256: text("request_sha256").notNull(),
+    ledgerSeq: integer("ledger_seq").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.catalogEventKey, table.circleKey],
+      foreignColumns: [
+        catalogEditionCircles.catalogEventKey,
+        catalogEditionCircles.circleKey,
+      ],
+    }),
+    foreignKey({
+      columns: [table.catalogEventKey],
+      foreignColumns: [catalogEditions.catalogEventKey],
+    }),
+    index("curated_decisions_subject").on(
+      table.catalogEventKey,
+      table.circleKey,
+      table.createdAt,
+    ),
+    unique().on(table.requestID),
+    unique().on(
+      table.catalogEventKey,
+      table.circleKey,
+      table.slot,
+      table.slotRevision,
+    ),
+    unique().on(table.catalogEventKey, table.ledgerSeq),
+    check(
+      "curated_decisions_check_1",
+      sql.raw("length(slot) BETWEEN 1 AND 200"),
+    ),
+    check("curated_decisions_check_2", sql.raw("slot_revision > 0")),
+    check(
+      "curated_decisions_check_3",
+      sql.raw("operation IN ('assert', 'reverse')"),
+    ),
+    check(
+      "curated_decisions_check_4",
+      sql.raw(
+        "decision_type IN ( 'x_account_attach', 'x_account_suppress', 'attendance_assert', 'attendance_claim_suppress', 'circle_identity_link')",
+      ),
+    ),
+    check("curated_decisions_check_5", sql.raw("json_valid(payload_json)")),
+    check(
+      "curated_decisions_check_6",
+      sql.raw("actor_kind IN ('operator', 'system', 'legacy_import')"),
+    ),
+    check(
+      "curated_decisions_check_7",
+      sql.raw(
+        "reason_code IN ( 'report_confirmed', 'operator_observed', 'provider_data_error', 'false_match', 'impersonation_or_unofficial', 'circle_request', 'identity_resolution', 'legacy_label_import', 'other')",
+      ),
+    ),
+    check(
+      "curated_decisions_check_8",
+      sql.raw("json_valid(evidence_refs_json)"),
+    ),
+  ],
+);
+
+export const curatedDecisionHeads = sqliteTable(
+  "curated_decision_heads",
+  {
+    catalogEventKey: text("catalog_event_key").notNull(),
+    circleKey: text("circle_key").notNull(),
+    slot: text("slot").notNull(),
+    slotRevision: integer("slot_revision").notNull(),
+    activeDecisionID: text("active_decision_id"),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.catalogEventKey, table.circleKey, table.slot],
+    }),
+    foreignKey({
+      columns: [table.activeDecisionID],
+      foreignColumns: [curatedDecisions.decisionID],
+    }),
+  ],
+);
+
+export const curatedEditionLedgerHeads = sqliteTable(
+  "curated_edition_ledger_heads",
+  {
+    catalogEventKey: text("catalog_event_key").primaryKey(),
+    ledgerSeq: integer("ledger_seq").notNull(),
+    publishedThroughSeq: integer("published_through_seq").notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.catalogEventKey],
+      foreignColumns: [catalogEditions.catalogEventKey],
+    }),
+    check(
+      "curated_edition_ledger_heads_check_1",
+      sql.raw("published_through_seq <= ledger_seq"),
+    ),
+  ],
+);
+
+export const curatedDecisionRequestReceipts = sqliteTable(
+  "curated_decision_request_receipts",
+  {
+    requestID: text("request_id").primaryKey(),
+    requestSHA256: text("request_sha256").notNull(),
+    decisionID: text("decision_id").notNull(),
+    responseJSON: text("response_json").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.decisionID],
+      foreignColumns: [curatedDecisions.decisionID],
+    }),
+  ],
+);
+
 export const circleUpdateEvents = sqliteTable(
   "circle_update_events",
   {
@@ -3272,6 +3438,10 @@ export const migratedTables = {
   crawler_snapshot_object_cleanup: crawlerSnapshotObjectCleanup,
   crawler_snapshot_publication_receipts: crawlerSnapshotPublicationReceipts,
   crawler_snapshot_versions: crawlerSnapshotVersions,
+  curated_decision_heads: curatedDecisionHeads,
+  curated_decision_request_receipts: curatedDecisionRequestReceipts,
+  curated_decisions: curatedDecisions,
+  curated_edition_ledger_heads: curatedEditionLedgerHeads,
   circle_state_heads: circleStateHeads,
   circle_update_events: circleUpdateEvents,
   circle_update_targets: circleUpdateTargets,

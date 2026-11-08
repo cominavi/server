@@ -20,6 +20,7 @@ const migrations = [
   "migrations/0009_crawler_realtime_snapshots.sql",
   "migrations/0010_shinagaki_analysis.sql",
   "migrations/0011_catalog_identity.sql",
+  "migrations/0012_curated_decisions.sql",
 ];
 
 const expectedTextEnums: Record<string, string[]> = {
@@ -100,6 +101,26 @@ const expectedTextEnums: Record<string, string[]> = {
   "circle_update_events.confidence": ["high", "medium", "low", "unmatched"],
   "circlems_oauth_starts.purpose": ["authenticate", "link"],
   "circlems_oauth_starts.environment": ["production", "sandbox"],
+  "curated_decisions.actor_kind": ["operator", "system", "legacy_import"],
+  "curated_decisions.decision_type": [
+    "x_account_attach",
+    "x_account_suppress",
+    "attendance_assert",
+    "attendance_claim_suppress",
+    "circle_identity_link",
+  ],
+  "curated_decisions.operation": ["assert", "reverse"],
+  "curated_decisions.reason_code": [
+    "report_confirmed",
+    "operator_observed",
+    "provider_data_error",
+    "false_match",
+    "impersonation_or_unofficial",
+    "circle_request",
+    "identity_resolution",
+    "legacy_label_import",
+    "other",
+  ],
   "deleted_provider_identity_tombstones.provider": [
     "circlems",
     "google",

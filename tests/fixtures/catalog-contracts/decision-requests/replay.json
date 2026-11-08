@@ -1,0 +1,66 @@
+{
+  "description": "The same requestID and payload replayed after a lost response returns the original result.",
+  "steps": [
+    {
+      "request": {
+        "requestID": "0b9e2c4a-6f1d-4c3e-9a57-2d8f1e6b3c01",
+        "subject": {
+          "catalogEventKey": "comiket-108",
+          "circleKey": "10000003"
+        },
+        "slot": "attendance",
+        "operation": "assert",
+        "decisionType": "attendance_assert",
+        "payloadSchemaVersion": 1,
+        "payload": {
+          "status": "withdrawn",
+          "day": 2
+        },
+        "baseRevision": 0,
+        "reason": {
+          "code": "operator_observed",
+          "text": "Circle posted a cancellation on X.",
+          "evidenceRefs": [
+            "x_post:1234567890"
+          ]
+        }
+      },
+      "requestSHA256": "a7948eab290faa945097e42807d95556a1c6b1eacba471afdda4493379c67887",
+      "expect": {
+        "status": 201,
+        "slotRevision": 1
+      }
+    },
+    {
+      "request": {
+        "requestID": "0b9e2c4a-6f1d-4c3e-9a57-2d8f1e6b3c01",
+        "subject": {
+          "catalogEventKey": "comiket-108",
+          "circleKey": "10000003"
+        },
+        "slot": "attendance",
+        "operation": "assert",
+        "decisionType": "attendance_assert",
+        "payloadSchemaVersion": 1,
+        "payload": {
+          "status": "withdrawn",
+          "day": 2
+        },
+        "baseRevision": 0,
+        "reason": {
+          "code": "operator_observed",
+          "text": "Circle posted a cancellation on X.",
+          "evidenceRefs": [
+            "x_post:1234567890"
+          ]
+        }
+      },
+      "requestSHA256": "a7948eab290faa945097e42807d95556a1c6b1eacba471afdda4493379c67887",
+      "expect": {
+        "status": 200,
+        "replayed": true,
+        "slotRevision": 1
+      }
+    }
+  ]
+}
