@@ -216,7 +216,30 @@ const snapshotContentType =
 // ---------------------------------------------------------------------------
 // Export (production, read-only)
 
+class InconsistentSourceRead extends Error {}
+
+/**
+ * Exports, retrying when production published a catalog between two of the
+ * export's reads (the reads are not one transaction).
+ */
 export async function exportPublishedData(
+  source: MirrorSource,
+  outDir: string,
+  log: (line: string) => void = () => {},
+  now = new Date(),
+): Promise<MirrorManifest> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await exportPublishedDataOnce(source, outDir, log, now);
+    } catch (error) {
+      if (!(error instanceof InconsistentSourceRead) || attempt >= 3)
+        throw error;
+      log(`${error.message} Retrying the export.`);
+    }
+  }
+}
+
+async function exportPublishedDataOnce(
   source: MirrorSource,
   outDir: string,
   log: (line: string) => void = () => {},
@@ -255,6 +278,21 @@ export async function exportPublishedData(
     .map((row) => row.active_version_id)
     .filter((id): id is string => typeof id === "string" && versionIDs.has(id))
     .sort();
+  // The events were read before the versions. If production published a new
+  // version in between, an event still points at a version that is now
+  // superseded; that snapshot is unreadable, so read everything again.
+  const versionStateByID = new Map(
+    rowsByTable
+      .get("catalog_versions")!
+      .map((row) => [String(row.id), String(row.state)]),
+  );
+  for (const versionID of activeVersionIDs) {
+    if (versionStateByID.get(versionID) !== "published") {
+      throw new InconsistentSourceRead(
+        `Active version ${versionID} is not published in the same export.`,
+      );
+    }
+  }
   // Pointers to versions that are not mirrored (never expected) are cleared,
   // so the target can never point at a missing version.
   for (const event of rowsByTable.get("catalog_events")!) {
@@ -499,17 +537,8 @@ export async function importBundle(
   let insertedRows = 0;
   const activations: Row[] = [];
   const versionStates: Row[] = [];
-  // Crawler snapshot cursors are positions in the TARGET's realtime append
-  // log: the imported snapshot replaces every target event up to now.
-  const targetLogCursor = Number(
-    (
-      await target.database
-        .prepare(
-          `SELECT COALESCE(MAX("id"), 0) AS "cursor" FROM "circle_update_events"`,
-        )
-        .first<{ cursor: number }>()
-    )?.cursor ?? 0,
-  );
+  const snapshotVersions: Row[] = [];
+  const snapshotHeads: Row[] = [];
   for (const table of manifest.tables) {
     if (table.rows === 0) continue;
     let rows = readFileSync(
@@ -531,7 +560,6 @@ export async function importBundle(
       rows = rows.map(({ active_version_id: _, ...row }) => row);
     }
     let preserve: string[] = [];
-    let updateWhen: string[] | undefined;
     if (table.table === "catalog_versions") {
       // A version's state changes (published -> superseded) only together
       // with event activation at the end. New versions land as invisible
@@ -541,17 +569,13 @@ export async function importBundle(
       rows = rows.map((row) => ({ ...row, state: "staging" }));
       preserve = ["state"];
     }
-    if (
-      table.table === "crawler_snapshot_versions" ||
-      table.table === "crawler_snapshot_heads"
-    ) {
-      rows = rows.map((row) => ({
-        ...row,
-        publication_cursor: targetLogCursor,
-      }));
-      // Re-importing the same snapshot keeps its original fence; only a new
-      // revision moves the head (and its cursor).
-      if (table.table === "crawler_snapshot_heads") updateWhen = ["revision"];
+    if (table.table === "crawler_snapshot_versions") {
+      snapshotVersions.push(...rows);
+      continue;
+    }
+    if (table.table === "crawler_snapshot_heads") {
+      snapshotHeads.push(...rows);
+      continue;
     }
     if (table.table === "catalog_provider_aliases") {
       // Retirements first, so a live replacement never collides with the
@@ -575,14 +599,7 @@ export async function importBundle(
       const statements = rows
         .slice(start, start + insertBatchSize)
         .map((row) =>
-          upsertStatement(
-            target.database,
-            table,
-            columns,
-            row,
-            preserve,
-            updateWhen,
-          ),
+          upsertStatement(target.database, table, columns, row, preserve),
         );
       const results = await target.database.batch(statements);
       insertedRows += results.reduce(
@@ -591,8 +608,14 @@ export async function importBundle(
       );
     }
   }
-  // Publication: version states and event activation in one atomic batch.
+  // Publication: crawler snapshots, version states, and event activation in
+  // one atomic batch.
   const publication = [
+    ...(await snapshotStatements(
+      target.database,
+      snapshotVersions,
+      snapshotHeads,
+    )),
     ...versionStates.map((version) =>
       target.database
         .prepare(
@@ -620,13 +643,114 @@ export async function importBundle(
   return { insertedRows, uploadedObjects };
 }
 
+/**
+ * Crawler snapshots are installed inside the final publication batch.
+ *
+ * - `publication_cursor` is a position in the TARGET's own realtime append log
+ *   (production's log is not mirrored). It is read inside the same atomic
+ *   batch, so the imported snapshot replaces every target event committed
+ *   before it, with no window for a concurrent append.
+ * - `generation` must be unique per event in the target, which may have its
+ *   own snapshot history. A new revision gets the production generation or
+ *   one past the target's highest, whichever is larger; a revision the target
+ *   already has keeps its generation.
+ * - Re-importing the head's current revision changes nothing, so its fence is
+ *   kept; only a new revision moves the head.
+ */
+async function snapshotStatements(
+  database: D1Database,
+  versions: Row[],
+  heads: Row[],
+): Promise<D1PreparedStatement[]> {
+  const cursor = `(SELECT COALESCE(MAX("id"), 0) FROM "circle_update_events")`;
+  const statements: D1PreparedStatement[] = [];
+  for (const head of heads) {
+    const version = versions.find(
+      (row) =>
+        row.event_number === head.event_number &&
+        row.revision === head.revision,
+    );
+    if (!version)
+      throw new Error(`Bundle lacks snapshot ${String(head.revision)}.`);
+    const existing = await database
+      .prepare(
+        `SELECT "generation" FROM "crawler_snapshot_versions"
+         WHERE "event_number" = ?1 AND "revision" = ?2`,
+      )
+      .bind(version.event_number, version.revision)
+      .first<{ generation: number }>();
+    const highest = await database
+      .prepare(
+        `SELECT COALESCE(MAX("generation"), 0) AS "generation"
+         FROM "crawler_snapshot_versions" WHERE "event_number" = ?1`,
+      )
+      .bind(version.event_number)
+      .first<{ generation: number }>();
+    const generation =
+      existing?.generation ??
+      Math.max(
+        Number(version.generation),
+        Number(highest?.generation ?? 0) + 1,
+      );
+    statements.push(
+      insertSelect(
+        database,
+        "crawler_snapshot_versions",
+        { ...version, generation },
+        "OR IGNORE",
+        cursor,
+        "",
+      ),
+      insertSelect(
+        database,
+        "crawler_snapshot_heads",
+        { ...head, generation },
+        "",
+        cursor,
+        `ON CONFLICT ("event_number") DO UPDATE SET
+           "revision" = excluded."revision",
+           "generation" = excluded."generation",
+           "publication_cursor" = excluded."publication_cursor",
+           "publication_idempotency_key" = excluded."publication_idempotency_key",
+           "updated_at" = excluded."updated_at"
+         WHERE "crawler_snapshot_heads"."revision" IS NOT excluded."revision"`,
+      ),
+    );
+  }
+  return statements;
+}
+
+/** `INSERT … SELECT` with `publication_cursor` taken from a SQL expression. */
+function insertSelect(
+  database: D1Database,
+  table: string,
+  row: Row,
+  modifier: string,
+  cursorExpression: string,
+  conflict: string,
+): D1PreparedStatement {
+  const columns = Object.keys(row);
+  const values: Array<string | number | null> = [];
+  const expressions = columns.map((column) => {
+    if (column === "publication_cursor") return cursorExpression;
+    values.push(row[column] ?? null);
+    return `?${values.length}`;
+  });
+  return database
+    .prepare(
+      `INSERT ${modifier} INTO ${quoteIdentifier(table)}
+         (${columns.map(quoteIdentifier).join(", ")})
+       SELECT ${expressions.join(", ")} WHERE true ${conflict}`,
+    )
+    .bind(...values);
+}
+
 function upsertStatement(
   database: D1Database,
   table: MirrorTable,
   columns: string[],
   row: Row,
   preserve: string[] = [],
-  updateWhen?: string[],
 ): D1PreparedStatement {
   const names = columns.map(quoteIdentifier).join(", ");
   const placeholders = columns.map((_, index) => `?${index + 1}`).join(", ");
@@ -652,7 +776,7 @@ function upsertStatement(
     (column) =>
       `${quoteIdentifier(column)} = excluded.${quoteIdentifier(column)}`,
   );
-  const changed = (updateWhen ?? mutable).map(
+  const changed = mutable.map(
     (column) =>
       `${quoteIdentifier(table.table)}.${quoteIdentifier(column)} IS NOT excluded.${quoteIdentifier(column)}`,
   );

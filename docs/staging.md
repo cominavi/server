@@ -187,10 +187,16 @@ Safety:
   batch after every other table. A failed or partial import leaves the
   previous catalog active and published. Alias retirements are applied before
   live replacements.
-- Crawler snapshot `publication_cursor` values point into production's
-  realtime log, which is not mirrored. On import they are set to the target's
-  own current log position, so the imported snapshot replaces every earlier
-  target event. Re-importing the same snapshot keeps its original fence.
+- Crawler snapshots are installed in that same final batch.
+  `publication_cursor` points into production's realtime log, which is not
+  mirrored, so it is set to the target's own log position, read inside the
+  batch: the imported snapshot replaces every target event committed before
+  it. A target with its own snapshot history keeps unique generations (a new
+  revision gets one past the target's highest). Re-importing the same
+  snapshot keeps its original fence.
+- Export reads are not one transaction. If production publishes a catalog
+  between two reads, the export notices the inconsistent snapshot and reads
+  everything again (up to three attempts).
 - `CLOUDFLARE_ENV` is ignored: the source is always the top-level
   (production) config, and the target is chosen only by `--target`.
 

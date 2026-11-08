@@ -659,3 +659,71 @@ test("an alias retirement and its live replacement mirror in one import", async 
     ],
   );
 });
+
+test("a target with its own snapshot history still takes the production snapshot", async () => {
+  const { source, staging, target, bundle } = setup();
+  const localRevision = sha("staging-only snapshot");
+  staging.native.exec(`
+    INSERT INTO crawler_snapshot_versions (
+      event_number, revision, schema_version, generation, catalog_payload_sha256,
+      matching_policy_revision, observed_at, update_count, object_key,
+      object_sha256, byte_count, publication_cursor, published_at
+    ) VALUES (
+      108, '${localRevision}', 1, 1, '${"8".repeat(64)}', 'match-1', 1, 0,
+      'crawler-realtime/v1/events/108/sha256/${localRevision}.json',
+      '${"9".repeat(64)}', 10, 0, 1
+    );
+    INSERT INTO crawler_snapshot_heads (
+      event_number, revision, generation, publication_cursor,
+      publication_idempotency_key, updated_at
+    ) VALUES (108, '${localRevision}', 1, 0, 'staging-local-publication', 1);
+  `);
+  await exportPublishedData(source, bundle);
+  await importBundle(bundle, target);
+  const head = staging.native
+    .prepare("SELECT revision, generation FROM crawler_snapshot_heads")
+    .get() as { revision: string; generation: number };
+  assert.deepEqual({ ...head }, { revision: snapshotRevision, generation: 2 });
+
+  const again = await importBundle(bundle, target);
+  assert.deepEqual(again, { insertedRows: 0, uploadedObjects: 0 });
+});
+
+test("an export that races a production publication is read again", async () => {
+  const { production, source, staging, target, bundle } = setup();
+  let published = false;
+  const racing = {
+    select: async (sql: string, params?: Array<string | number>) => {
+      const rows = await source.select(sql, params);
+      if (!published && sql.includes('FROM "catalog_events"')) {
+        published = true;
+        production.native.exec(`
+          INSERT INTO catalog_versions (
+            id, comiket_no, schema_version, state, claim_id,
+            source_main_sha256, source_image_sha256, circle_count,
+            created_at, published_at, catalog_event_key
+          ) VALUES ('c108-v4', 108, 1, 'published', 'claim-4',
+            '${"a".repeat(64)}', '${"b".repeat(64)}', 0, 4, 4, 'comiket-108');
+          UPDATE catalog_versions SET state = 'superseded' WHERE id = 'c108-v2';
+          UPDATE catalog_events SET active_version_id = 'c108-v4' WHERE comiket_no = 108;
+        `);
+      }
+      return rows;
+    },
+    getObject: source.getObject.bind(source),
+  };
+  const lines: string[] = [];
+  await exportPublishedData(racing, bundle, (line) => lines.push(line));
+  assert.ok(lines.some((line) => line.includes("Retrying the export")));
+  await importBundle(bundle, target);
+  assert.equal(
+    (
+      staging.native
+        .prepare(
+          "SELECT active_version_id AS id FROM catalog_events WHERE comiket_no = 108",
+        )
+        .get() as { id: string }
+    ).id,
+    "c108-v4",
+  );
+});
