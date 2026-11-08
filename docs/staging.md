@@ -173,7 +173,8 @@ Safety:
   miniflare state for `local`, or remote bindings to exactly the staging D1
   and the two staging catalog buckets for `staging`. It refuses a target that
   shares a Worker name, database name or ID, or bucket name with production,
-  and refuses the zero placeholder database ID. Staging import uses the
+  and refuses the zero placeholder database ID. Every production bucket counts,
+  not only the two catalog buckets. Staging import uses the
   operator's Wrangler auth (`wrangler login` or `CLOUDFLARE_API_TOKEN`).
 - Both steps are idempotent: objects already present with the same size,
   content type and metadata are skipped; immutable rows use
@@ -191,8 +192,10 @@ Safety:
   `publication_cursor` points into production's realtime log, which is not
   mirrored, so it is set to the target's own log position, read inside the
   batch: the imported snapshot replaces every target event committed before
-  it. A target with its own snapshot history keeps unique generations (a new
-  revision gets one past the target's highest). Re-importing the same
+  it. The snapshot generation is part of the canonical object and is never
+  rewritten: if the target already has a different snapshot at the same
+  generation (its own history), that event's snapshot is skipped with a
+  warning and the rest of the bundle still imports. Re-importing the same
   snapshot keeps its original fence.
 - Export reads are not one transaction. If production publishes a catalog
   between two reads, the export notices the inconsistent snapshot and reads

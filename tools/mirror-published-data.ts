@@ -489,7 +489,11 @@ export async function importBundle(
   bundleDir: string,
   target: MirrorTarget,
   log: (line: string) => void = () => {},
-): Promise<{ insertedRows: number; uploadedObjects: number }> {
+): Promise<{
+  insertedRows: number;
+  uploadedObjects: number;
+  skippedSnapshotEvents: number[];
+}> {
   const manifest = JSON.parse(
     readFileSync(join(bundleDir, "manifest.json"), "utf8"),
   ) as MirrorManifest;
@@ -610,12 +614,14 @@ export async function importBundle(
   }
   // Publication: crawler snapshots, version states, and event activation in
   // one atomic batch.
+  const snapshots = await snapshotStatements(
+    target.database,
+    snapshotVersions,
+    snapshotHeads,
+    log,
+  );
   const publication = [
-    ...(await snapshotStatements(
-      target.database,
-      snapshotVersions,
-      snapshotHeads,
-    )),
+    ...snapshots.statements,
     ...versionStates.map((version) =>
       target.database
         .prepare(
@@ -640,7 +646,11 @@ export async function importBundle(
       0,
     );
   }
-  return { insertedRows, uploadedObjects };
+  return {
+    insertedRows,
+    uploadedObjects,
+    skippedSnapshotEvents: snapshots.skipped,
+  };
 }
 
 /**
@@ -650,10 +660,11 @@ export async function importBundle(
  *   (production's log is not mirrored). It is read inside the same atomic
  *   batch, so the imported snapshot replaces every target event committed
  *   before it, with no window for a concurrent append.
- * - `generation` must be unique per event in the target, which may have its
- *   own snapshot history. A new revision gets the production generation or
- *   one past the target's highest, whichever is larger; a revision the target
- *   already has keeps its generation.
+ * - `generation` is part of the canonical snapshot object, so it is never
+ *   rewritten. If the target already has a DIFFERENT snapshot at the same
+ *   `(event, generation)` (target-local history), that event's snapshot is
+ *   skipped with a warning and the target keeps its own; everything else
+ *   still imports.
  * - Re-importing the head's current revision changes nothing, so its fence is
  *   kept; only a new revision moves the head.
  */
@@ -661,9 +672,11 @@ async function snapshotStatements(
   database: D1Database,
   versions: Row[],
   heads: Row[],
-): Promise<D1PreparedStatement[]> {
+  log: (line: string) => void,
+): Promise<{ statements: D1PreparedStatement[]; skipped: number[] }> {
   const cursor = `(SELECT COALESCE(MAX("id"), 0) FROM "circle_update_events")`;
   const statements: D1PreparedStatement[] = [];
+  const skipped: number[] = [];
   for (const head of heads) {
     const version = versions.find(
       (row) =>
@@ -672,26 +685,21 @@ async function snapshotStatements(
     );
     if (!version)
       throw new Error(`Bundle lacks snapshot ${String(head.revision)}.`);
-    const existing = await database
+    const collision = await database
       .prepare(
-        `SELECT "generation" FROM "crawler_snapshot_versions"
-         WHERE "event_number" = ?1 AND "revision" = ?2`,
+        `SELECT "revision" FROM "crawler_snapshot_versions"
+         WHERE "event_number" = ?1 AND "generation" = ?2 AND "revision" != ?3`,
       )
-      .bind(version.event_number, version.revision)
-      .first<{ generation: number }>();
-    const highest = await database
-      .prepare(
-        `SELECT COALESCE(MAX("generation"), 0) AS "generation"
-         FROM "crawler_snapshot_versions" WHERE "event_number" = ?1`,
-      )
-      .bind(version.event_number)
-      .first<{ generation: number }>();
-    const generation =
-      existing?.generation ??
-      Math.max(
-        Number(version.generation),
-        Number(highest?.generation ?? 0) + 1,
+      .bind(version.event_number, version.generation, version.revision)
+      .first<{ revision: string }>();
+    if (collision) {
+      log(
+        `skipped crawler snapshot for event ${String(version.event_number)}: the target already has a different snapshot (${collision.revision}) at generation ${String(version.generation)}`,
       );
+      skipped.push(Number(version.event_number));
+      continue;
+    }
+    const generation = Number(version.generation);
     statements.push(
       insertSelect(
         database,
@@ -717,7 +725,7 @@ async function snapshotStatements(
       ),
     );
   }
-  return statements;
+  return { statements, skipped };
 }
 
 /** `INSERT … SELECT` with `publication_cursor` taken from a SQL expression. */
@@ -943,6 +951,9 @@ export function mirrorResources(config: ResolvedConfig) {
     databaseID: database.database_id,
     databaseName: database.database_name,
     buckets: { downloads, catalogs },
+    allBuckets: config.r2_buckets.flatMap((b) =>
+      b.bucket_name ? [b.bucket_name] : [],
+    ),
   };
 }
 
@@ -955,8 +966,8 @@ export function assertNotProduction(
     production.workerName,
     production.databaseID,
     production.databaseName,
-    production.buckets.downloads,
-    production.buckets.catalogs,
+    // Every production bucket, not only the two the mirror writes.
+    ...production.allBuckets,
   ]);
   for (const value of [
     target.workerName,
@@ -964,6 +975,7 @@ export function assertNotProduction(
     target.databaseName,
     target.buckets.downloads,
     target.buckets.catalogs,
+    ...target.allBuckets,
   ]) {
     if (used.has(value)) {
       throw new Error(`Refusing to write to production resource ${value}.`);

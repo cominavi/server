@@ -371,7 +371,11 @@ test("import reproduces the published data in the target and is idempotent", asy
   const puts = targetBuckets.downloads.puts + targetBuckets.catalogs.puts;
   await exportPublishedData(source, bundle);
   const second = await importBundle(bundle, target);
-  assert.deepEqual(second, { insertedRows: 0, uploadedObjects: 0 });
+  assert.deepEqual(second, {
+    insertedRows: 0,
+    uploadedObjects: 0,
+    skippedSnapshotEvents: [],
+  });
   assert.equal(
     targetBuckets.downloads.puts + targetBuckets.catalogs.puts,
     puts,
@@ -481,6 +485,15 @@ test("the import target can never be a production resource", async () => {
         },
       }),
     /production resource/,
+  );
+  assert.throws(
+    () =>
+      assertNotProduction(production, {
+        ...staging,
+        databaseID: "11111111-1111-1111-1111-111111111111",
+        buckets: { ...staging.buckets, catalogs: "cominavi-avatars" },
+      }),
+    /production resource cominavi-avatars/,
   );
   // The committed staging config still has the zero placeholder ID.
   assert.throws(() => assertNotProduction(production, staging), /placeholder/);
@@ -660,7 +673,7 @@ test("an alias retirement and its live replacement mirror in one import", async 
   );
 });
 
-test("a target with its own snapshot history still takes the production snapshot", async () => {
+test("a snapshot that collides with target-local history is skipped, not rewritten", async () => {
   const { source, staging, target, bundle } = setup();
   const localRevision = sha("staging-only snapshot");
   staging.native.exec(`
@@ -679,14 +692,29 @@ test("a target with its own snapshot history still takes the production snapshot
     ) VALUES (108, '${localRevision}', 1, 0, 'staging-local-publication', 1);
   `);
   await exportPublishedData(source, bundle);
-  await importBundle(bundle, target);
+  const lines: string[] = [];
+  const result = await importBundle(bundle, target, (line) => lines.push(line));
+  assert.deepEqual(result.skippedSnapshotEvents, [108]);
+  assert.ok(lines.some((line) => line.includes("skipped crawler snapshot")));
   const head = staging.native
     .prepare("SELECT revision, generation FROM crawler_snapshot_heads")
     .get() as { revision: string; generation: number };
-  assert.deepEqual({ ...head }, { revision: snapshotRevision, generation: 2 });
-
-  const again = await importBundle(bundle, target);
-  assert.deepEqual(again, { insertedRows: 0, uploadedObjects: 0 });
+  assert.deepEqual({ ...head }, { revision: localRevision, generation: 1 });
+  // The rest of the bundle still imported and activated.
+  assert.equal(
+    (
+      staging.native
+        .prepare(
+          "SELECT active_version_id AS id FROM catalog_events WHERE comiket_no = 108",
+        )
+        .get() as { id: string }
+    ).id,
+    "c108-v2",
+  );
+  assert.equal(
+    count(staging, "SELECT COUNT(*) AS n FROM circle_tag_overlay_heads"),
+    1,
+  );
 });
 
 test("an export that races a production publication is read again", async () => {
