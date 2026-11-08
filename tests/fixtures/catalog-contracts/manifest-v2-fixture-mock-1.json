@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 2,
+  "catalogEventKey": "fixture-mock-1",
+  "legacyComiketNo": null,
+  "metadata": {
+    "metadataSchemaVersion": 1,
+    "catalogEventKey": "fixture-mock-1",
+    "seriesKey": "fixture",
+    "legacyComiketNo": null,
+    "displayName": {
+      "ja": "フィクスチャ1",
+      "en": "Fixture Mock 1"
+    },
+    "shortName": {
+      "ja": "FX1",
+      "en": "FX1"
+    },
+    "timeZone": "Asia/Tokyo",
+    "days": [
+      {
+        "day": 1,
+        "date": "2027-05-05"
+      }
+    ],
+    "venue": {
+      "venueKey": "unknown",
+      "displayName": {
+        "ja": "未定",
+        "en": "TBD"
+      }
+    }
+  },
+  "versionID": "fixture-mock-1-v2-89abcdef0123456789abcdef",
+  "publishedAt": 1809000000,
+  "sourceUpdatedAt": null,
+  "source": {
+    "provider": "fixture",
+    "adapterVersion": 1,
+    "sourceMainSHA256": "68db309eb96ca814c41c92c9aa7591cae055c58069faa56368d68fa9b8338610"
+  },
+  "artifact": {
+    "format": 2,
+    "url": "/api/v2/catalog-events/fixture-mock-1/versions/fixture-mock-1-v2-89abcdef0123456789abcdef/artifact",
+    "sha256": "9e0b888a159924c08d33a0272581376f61d7511503f8fa54871d8277eafad53a",
+    "bytes": 147456,
+    "contentType": "application/vnd.cominavi.catalog-v2+sqlite"
+  },
+  "counts": {
+    "circles": 3,
+    "layouts": 2,
+    "images": 4
+  },
+  "capabilitySchemaVersion": 1,
+  "capabilities": {
+    "catalogArtifact": "supported",
+    "circleImages": "supported",
+    "commonImages": "supported",
+    "sharedPlans": "unsupported",
+    "futureCapabilityExample": "supported"
+  },
+  "circleIdentity": "catalogEventKey+circleKey"
+}

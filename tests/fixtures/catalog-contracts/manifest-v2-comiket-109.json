@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 2,
+  "catalogEventKey": "comiket-109",
+  "legacyComiketNo": 109,
+  "metadata": {
+    "metadataSchemaVersion": 1,
+    "catalogEventKey": "comiket-109",
+    "seriesKey": "comiket",
+    "legacyComiketNo": 109,
+    "displayName": {
+      "ja": "コミックマーケット109",
+      "en": "Comic Market 109"
+    },
+    "shortName": {
+      "ja": "C109",
+      "en": "C109"
+    },
+    "timeZone": "Asia/Tokyo",
+    "days": [
+      {
+        "day": 1,
+        "date": "2026-12-30"
+      },
+      {
+        "day": 2,
+        "date": "2026-12-31"
+      }
+    ],
+    "venue": {
+      "venueKey": "tokyo-big-sight",
+      "displayName": {
+        "ja": "東京ビッグサイト",
+        "en": "Tokyo Big Sight"
+      }
+    }
+  },
+  "versionID": "c109-v1-fedcba9876543210fedcba98",
+  "publishedAt": 1798000000,
+  "sourceUpdatedAt": 1797900000,
+  "source": {
+    "provider": "circlems",
+    "adapterVersion": 1,
+    "sourceMainSHA256": "0ef6287578583e02a661541d9182891eb9070d2c2334199d69923c9a17b3c6aa"
+  },
+  "artifact": {
+    "format": 1,
+    "url": "/api/v2/catalog-events/comiket-109/versions/c109-v1-fedcba9876543210fedcba98/artifact",
+    "sha256": "40e36706afd781fde854d19fee8a307cca65990250e358bfbab0ff525624d437",
+    "bytes": 163840,
+    "contentType": "application/vnd.cominavi.catalog-v1+sqlite"
+  },
+  "counts": {
+    "circles": 22854,
+    "layouts": 5759,
+    "images": 23001
+  },
+  "capabilitySchemaVersion": 1,
+  "capabilities": {
+    "catalogArtifact": "supported",
+    "circleImages": "supported",
+    "commonImages": "supported",
+    "venueMap": "supported",
+    "favorites": "supported",
+    "providerFavoriteMirror": "supported",
+    "socialEnrichment": "supported",
+    "realtimeUpdates": "supported",
+    "attendanceStatus": "supported",
+    "tagOverlay": "supported",
+    "curatedOverlay": "supported",
+    "structuredShinagaki": "unsupported",
+    "circleReports": "unsupported",
+    "reminders": "supported",
+    "sharedPlans": "supported"
+  },
+  "circleIdentity": "catalogEventKey+circleKey"
+}
