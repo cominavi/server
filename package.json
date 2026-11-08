@@ -19,6 +19,8 @@
     "seed:c108": "tsx tools/generate-realtime-seed.ts",
     "shinagaki:prepare": "tsx tools/prepare-shinagaki-analysis-import.ts",
     "deploy": "pnpm build && pnpm sentry:sourcemaps && wrangler deploy",
+    "build:staging": "CLOUDFLARE_ENV=staging pnpm build",
+    "deploy:staging": "pnpm build:staging && wrangler d1 migrations apply COMINAVI_DB -c wrangler.jsonc --env staging --remote && CLOUDFLARE_ENV=staging wrangler deploy",
     "preview": "astro preview",
     "astro": "astro",
     "sentry:sourcemaps": "sentry-cli sourcemaps inject dist && sentry-cli sourcemaps upload --org=cominavi --project=cominavi-server --wait --strict dist && find dist -type f -name '*.map' -delete"

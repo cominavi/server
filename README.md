@@ -80,7 +80,9 @@ The following-import API additionally needs local D1 and KV bindings named
 privacy boundary, cooldown behavior, and cost model are documented in
 [`docs/following-import-api.md`](docs/following-import-api.md).
 Realtime updates, favorites, APNs devices, and crawler ingestion are documented
-in [`docs/realtime-api.md`](docs/realtime-api.md).
+in [`docs/realtime-api.md`](docs/realtime-api.md). The hosted staging Worker
+(`staging.cominavi.net`, `env.staging`) is documented in
+[`docs/staging.md`](docs/staging.md).
 
 Provider-neutral accounts, profiles, rotating refresh sessions, private R2
 avatars, Shared Plans, invitations, and per-plan Durable Object sync are exposed
