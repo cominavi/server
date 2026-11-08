@@ -219,6 +219,26 @@ test("the logout fence and deletion fence win over a test login", async () => {
   );
 });
 
+test("a creation failure that is not a label race is reported, not masked", async () => {
+  const database = migratedDatabase();
+  database.native.exec(
+    "CREATE TRIGGER refuse_test_identity BEFORE INSERT ON test_identities BEGIN SELECT RAISE(ABORT, 'simulated storage failure'); END;",
+  );
+  await assert.rejects(
+    authenticateTestIdentity(
+      database.binding,
+      { label: "broken" },
+      jwtSecret,
+      now,
+    ),
+    /simulated storage failure/,
+  );
+  const users = database.native
+    .prepare("SELECT COUNT(*) AS count FROM users")
+    .get() as { count: number };
+  assert.equal(users.count, 0, "the user insert rolled back");
+});
+
 test("deleting the user removes the label, so it later names a new account", async () => {
   const database = migratedDatabase();
   const first = await authenticateTestIdentity(

@@ -146,9 +146,11 @@ export async function authenticateTestIdentity(
   const now = Math.floor(nowMilliseconds / 1_000);
   let account = await findTestAccount(database, input.label);
   if (!account) {
-    await createTestAccount(database, input, now);
+    const creationError = await createTestAccount(database, input, now);
     account = await findTestAccount(database, input.label);
-    if (!account) throw accountUnavailable();
+    // A failed creation is only benign when a concurrent request created the
+    // same label; otherwise surface the real error.
+    if (!account) throw creationError ?? accountUnavailable();
   }
   if (account.deletionPendingAt !== null) throw accountUnavailable();
   if (account.lastAuthFencedAt !== null && now <= account.lastAuthFencedAt) {
@@ -241,7 +243,7 @@ async function createTestAccount(
   database: D1Database,
   input: TestIdentityRequest,
   now: number,
-): Promise<void> {
+): Promise<unknown> {
   const publicID = randomPublicID();
   const displayName = input.displayName ?? `Test ${input.label}`;
   try {
@@ -263,9 +265,12 @@ async function createTestAccount(
           SELECT ${input.label}, id, ${now}, ${now}
           FROM users WHERE public_id = ${publicID}`,
     ]);
-  } catch {
-    // Lost a concurrent creation race for the same label; the caller re-reads.
+  } catch (error) {
+    // Usually a lost creation race for the same label; the caller re-reads
+    // and rethrows this error if the label still does not exist.
+    return error;
   }
+  return undefined;
 }
 
 async function constantTimeEqual(

@@ -51,6 +51,9 @@ export const sentrySensitiveCrawlerRequestHeaders = [
   "x-cominavi-signature",
   "x-cominavi-timestamp",
   "idempotency-key",
+  // Not a crawler header, but the same kind of reusable shared credential:
+  // the staging/dev test identity provider's secret.
+  "x-cominavi-test-identity-secret",
 ] as const;
 
 const sentrySensitiveCrawlerRequestHeaderSet = new Set<string>(

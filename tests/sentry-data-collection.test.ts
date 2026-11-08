@@ -18,6 +18,8 @@ test("Sentry never collects crawler authentication headers", async () => {
         "X-ComiNavi-Signature": "signature-must-not-leave-the-worker",
         "x-cominavi-timestamp": "timestamp-must-not-leave-the-worker",
         "Idempotency-Key": "request-id-must-not-leave-the-worker",
+        "X-ComiNavi-Test-Identity-Secret":
+          "test-identity-secret-must-not-leave-the-worker",
         "User-Agent": "ComiNavi collector",
       },
     },
@@ -33,6 +35,8 @@ test("Sentry never collects crawler authentication headers", async () => {
             "timestamp-must-not-leave-the-worker",
           "http.request.header.idempotency_key":
             "request-id-must-not-leave-the-worker",
+          "http.request.header.x_cominavi_test_identity_secret":
+            "test-identity-secret-must-not-leave-the-worker",
           "http.request.header.user_agent": "ComiNavi collector",
         },
       },
@@ -52,6 +56,10 @@ test("Sentry never collects crawler authentication headers", async () => {
   assert.doesNotMatch(serialized, /signature-must-not-leave-the-worker/);
   assert.doesNotMatch(serialized, /timestamp-must-not-leave-the-worker/);
   assert.doesNotMatch(serialized, /request-id-must-not-leave-the-worker/);
+  assert.doesNotMatch(
+    serialized,
+    /test-identity-secret-must-not-leave-the-worker/,
+  );
 
   const scrubbedSpan = options.beforeSendSpan?.({
     span_id: "fedcba9876543210",
