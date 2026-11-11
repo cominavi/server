@@ -7,7 +7,6 @@ import {
 
 export const prerender = false;
 
-// Response headers include "Cache-Control: no-store" (sign-in-entry-page.ts).
 export const GET: APIRoute = ({ request }) =>
   handleEntryPageGET("google", request, env);
 
