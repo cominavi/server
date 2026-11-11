@@ -528,7 +528,14 @@ test("the entry page asks for an optional code and returns a grant that carries 
 });
 
 test("Sentry never captures the entry forms' invite codes", () => {
-  for (const path of ["/auth/google", "/auth/apple"])
+  for (const path of [
+    "/auth/google",
+    "/auth/apple",
+    "/auth/google/",
+    "/auth/apple//",
+    "/auth/Google",
+    "/auth/apple?nonce=x",
+  ])
     assert.equal(ignoresSentryRequestBody(`https://cominavi.net${path}`), true);
   assert.equal(
     ignoresSentryRequestBody("https://cominavi.net/api/v2/internal/x"),

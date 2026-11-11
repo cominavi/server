@@ -100,10 +100,13 @@ export function scrubSensitiveCrawlerHeadersFromSentrySpan<
  */
 export function ignoresSentryRequestBody(url: string): boolean {
   const path = new URL(url).pathname;
+  // Astro also serves the entry pages with trailing slashes and any case
+  // the router normalizes, so compare a normalized form.
+  const entry = path.toLowerCase().replace(/\/+$/, "");
   return (
     path.startsWith("/api/v2/internal/") ||
-    path === "/auth/google" ||
-    path === "/auth/apple"
+    entry === "/auth/google" ||
+    entry === "/auth/apple"
   );
 }
 
