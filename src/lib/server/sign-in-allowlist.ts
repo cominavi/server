@@ -11,6 +11,15 @@ import { ServiceError } from "./service-error";
 
 export type AllowlistProvider = "google" | "apple";
 
+/**
+ * Set by the API layer on a verified provider identity whose verified email
+ * is a configured App Review address (`isReviewEmail` in access-tier.ts).
+ * Such an identity is admitted without an allowlist entry or invite.
+ */
+export interface SignInAdmission {
+  reviewAccount?: boolean;
+}
+
 const inviteAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const inviteLength = 20;
 
@@ -109,6 +118,7 @@ export function redeemGrantInviteSQL(
   nonceHash: string,
   audience: string,
   now: number,
+  reviewAccount = false,
 ): SQL {
   return sql`UPDATE sign_in_allowlist
     SET provider = ${provider}, provider_subject = ${subject},
@@ -122,7 +132,31 @@ export function redeemGrantInviteSQL(
       AND provider IS NULL AND revoked_at IS NULL
       AND invite_code_hash IS NOT NULL
       AND (invite_expires_at IS NULL OR invite_expires_at > ${now})
+      AND ${reviewAccount ? 1 : 0} = 0
       AND NOT ${admittedIdentitySQL(provider, subject)}`;
+}
+
+/** Batch guard on the grant-consuming statement. */
+export function signInAdmittedSQL(
+  provider: AllowlistProvider,
+  subject: string,
+  reviewAccount = false,
+): SQL {
+  return sql`(${reviewAccount ? 1 : 0} = 1 OR ${admittedIdentitySQL(provider, subject)})`;
+}
+
+/** Whether an identity may sign in without redeeming a new invite. */
+export async function isIdentityAdmitted(
+  database: D1Database,
+  provider: AllowlistProvider,
+  subject: string,
+  reviewAccount = false,
+): Promise<boolean> {
+  if (reviewAccount) return true;
+  const row = await createDatabase(database).get<{ admitted: number }>(
+    sql`SELECT ${admittedIdentitySQL(provider, subject)} AS admitted`,
+  );
+  return row?.admitted === 1;
 }
 
 /**
@@ -135,7 +169,9 @@ export async function assertSignInAllowed(
   subject: string,
   grantHash: string,
   now: number,
+  reviewAccount = false,
 ): Promise<void> {
+  if (reviewAccount) return;
   const row = await createDatabase(database).get<{ allowed: number }>(
     sql`SELECT ${admittedIdentitySQL(provider, subject)} OR EXISTS (
           SELECT 1 FROM google_entry_grants AS grant

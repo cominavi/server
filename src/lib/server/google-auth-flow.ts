@@ -22,9 +22,10 @@ import {
   providerSubjectDigest,
 } from "./provider-tombstones";
 import {
-  admittedIdentitySQL,
   assertSignInAllowed,
   redeemGrantInviteSQL,
+  signInAdmittedSQL,
+  type SignInAdmission,
 } from "./sign-in-allowlist";
 import { loadUserProfile, type UserProfile } from "./users";
 
@@ -45,7 +46,7 @@ export async function authenticateGoogleRequest(
   },
   jwtSecret: string,
   replayKey: string,
-  verifyIdentity: () => Promise<GoogleIdentity>,
+  verifyIdentity: () => Promise<GoogleIdentity & SignInAdmission>,
   nowMilliseconds = Date.now(),
   clock: () => number = () => Math.floor(Date.now() / 1_000),
 ): Promise<GoogleAuthenticationResult> {
@@ -76,7 +77,7 @@ export async function authenticateGoogleRequest(
 
 export async function completeGoogleAuthentication(
   database: D1Database,
-  google: GoogleIdentity,
+  google: GoogleIdentity & SignInAdmission,
   idToken: string,
   entryGrant: string,
   nonce: string,
@@ -149,7 +150,14 @@ export async function completeGoogleAuthentication(
   ) {
     throw unavailableGoogleGrant();
   }
-  await assertSignInAllowed(database, "google", google.subject, grantHash, now);
+  await assertSignInAllowed(
+    database,
+    "google",
+    google.subject,
+    grantHash,
+    now,
+    google.reviewAccount,
+  );
   const createsUser = !existing;
   const userID = existing?.userID ?? randomInternalID();
   const identityID = existing?.identityID ?? randomInternalID();
@@ -196,6 +204,7 @@ export async function completeGoogleAuthentication(
       nonceHash,
       entryAudience,
       finalNow,
+      google.reviewAccount,
     ),
   ];
   if (createsUser) {
@@ -309,7 +318,7 @@ export async function completeGoogleAuthentication(
          WHERE grant_hash = ${grantHash} AND nonce_hash = ${nonceHash}
            AND audience = ${entryAudience} AND expires_at > ${finalNow}
            AND consumed_at IS NULL
-           AND ${admittedIdentitySQL("google", google.subject)}
+           AND ${signInAdmittedSQL("google", google.subject, google.reviewAccount)}
            AND EXISTS (
              SELECT 1 FROM user_identities AS identity
              JOIN users AS user ON user.id = identity.user_id

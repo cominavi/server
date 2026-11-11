@@ -81,6 +81,12 @@ test("account deletion fences auth, tombstones owned plans, revokes Apple, and f
     database.rows(`SELECT id FROM users WHERE id = ${userID}`),
     [],
   );
+  assert.deepEqual(
+    database.rows(
+      "SELECT provider_subject FROM sign_in_allowlist ORDER BY provider_subject",
+    ),
+    [{ provider_subject: "apple.crash-safe.subject" }],
+  );
   assert.deepEqual(database.rows("SELECT id FROM shared_plans ORDER BY id"), [
     { id: "other-plan-0000000002" },
   ]);

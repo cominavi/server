@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { ignoresSentryRequestBody } from "../src/api/app";
 import { authenticateAppleRequest } from "../src/lib/server/apple-auth-flow";
 import { issueAppleEntryGrant } from "../src/lib/server/apple-entry-grants";
 import { rotateSession } from "../src/lib/server/auth-sessions";
@@ -373,14 +374,14 @@ test("the migration grandfathers every existing Google and Apple identity", () =
     {
       provider: "apple",
       provider_subject: "a-2",
-      label: `grandfathered apple user ${"b".repeat(32)}`,
+      label: "grandfathered apple user",
       invite_code_hash: null,
       revoked_at: null,
     },
     {
       provider: "google",
       provider_subject: "g-1",
-      label: `grandfathered google user ${"a".repeat(32)}`,
+      label: "grandfathered google user",
       invite_code_hash: null,
       revoked_at: null,
     },
@@ -524,6 +525,62 @@ test("the entry page asks for an optional code and returns a grant that carries 
     },
   );
   assert.equal(limited.headers.get("Location"), "/");
+});
+
+test("Sentry never captures the entry forms' invite codes", () => {
+  for (const path of ["/auth/google", "/auth/apple"])
+    assert.equal(ignoresSentryRequestBody(`https://cominavi.net${path}`), true);
+  assert.equal(
+    ignoresSentryRequestBody("https://cominavi.net/api/v2/internal/x"),
+    true,
+  );
+  assert.equal(
+    ignoresSentryRequestBody("https://cominavi.net/api/v2/auth/google"),
+    false,
+  );
+});
+
+test("an Apple entry revoked during the code exchange gets no account, and its token is queued for revocation", async () => {
+  const database = setup();
+  const code = generateInviteCode();
+  const entryID = "c".repeat(32);
+  database.native.exec(
+    inviteSQL({
+      entryID,
+      label: "revoked mid-exchange",
+      codeHash: inviteCodeHash(code),
+      now: 50,
+      expiresAt: null,
+    }),
+  );
+  const grant = await issueAppleEntryGrant(
+    database.binding,
+    appleNonce,
+    100_000,
+    entryID,
+  );
+  await assert.rejects(
+    signInApple(database, apple("new-apple"), grant.entryGrant, 1, async () => {
+      database.native.exec(revokeSQL(entryID, 105));
+      return {
+        refreshToken: "exchanged-apple-refresh",
+        clientID: apple("x").clientID,
+      };
+    }),
+    (error: unknown) => hasCode(error, "sign_in_not_allowlisted"),
+  );
+  assert.equal(count(database, "users"), 0);
+  assert.equal(count(database, "auth_refresh_tokens"), 0);
+  assert.deepEqual(
+    database.rows(
+      "SELECT state, stage_nonce, stage_ciphertext FROM apple_auth_requests",
+    ),
+    [{ state: "indeterminate", stage_nonce: null, stage_ciphertext: null }],
+  );
+  assert.deepEqual(
+    database.rows("SELECT id, state FROM apple_provider_revocations"),
+    [{ id: "refused:77777771-7777-4777-8777-777777777777", state: "queued" }],
+  );
 });
 
 function setup(): SQLiteD1Database {

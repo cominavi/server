@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isReviewEmail } from "../lib/server/access-tier";
 import {
   logoutSession,
   parseLogoutRequest,
@@ -232,7 +233,17 @@ export const authenticateWithGoogle = publicProcedure
       },
       context.env.COMINAVI_JWT_SECRET,
       context.env.COMINAVI_PROVIDER_CREDENTIAL_KEY_V1,
-      () => authenticateGoogle(input.idToken, context.env, nonce),
+      async () => {
+        const google = await authenticateGoogle(
+          input.idToken,
+          context.env,
+          nonce,
+        );
+        return {
+          ...google,
+          reviewAccount: isReviewEmail(context.env, google.email),
+        };
+      },
     );
     return normalizeSession(completed.response);
   });
@@ -316,7 +327,10 @@ export const authenticateWithApple = publicProcedure
           context.env,
           nonce,
         );
-        return verifiedIdentity;
+        return {
+          ...verifiedIdentity,
+          reviewAccount: isReviewEmail(context.env, verifiedIdentity.email),
+        };
       },
       async (identity) =>
         exchangeAppleAuthorizationCode(

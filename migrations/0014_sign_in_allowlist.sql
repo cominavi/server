@@ -38,7 +38,7 @@ INSERT INTO sign_in_allowlist (
   provider_subject, bound_at, created_at, revoked_at
 )
 SELECT lower(hex(randomblob(16))),
-       'grandfathered ' || identity.provider || ' user ' || user.public_id,
+       'grandfathered ' || identity.provider || ' user',
        NULL, NULL, identity.provider, identity.provider_subject,
        CAST(strftime('%s', 'now') AS INTEGER),
        CAST(strftime('%s', 'now') AS INTEGER), NULL

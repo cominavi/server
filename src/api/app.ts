@@ -94,6 +94,19 @@ export function scrubSensitiveCrawlerHeadersFromSentrySpan<
   return span;
 }
 
+/**
+ * Request bodies Sentry must never capture: the exact-byte signed internal
+ * streams, and the Google/Apple entry forms, which post plaintext invite codes.
+ */
+export function ignoresSentryRequestBody(url: string): boolean {
+  const path = new URL(url).pathname;
+  return (
+    path.startsWith("/api/v2/internal/") ||
+    path === "/auth/google" ||
+    path === "/auth/apple"
+  );
+}
+
 export function createHomepageSentryOptions(): Sentry.CloudflareOptions {
   return {
     dsn: "https://5366d55254bddce30ce78749ace96c70@o4508052459225088.ingest.us.sentry.io/4511898103709696",
@@ -120,8 +133,7 @@ export function createHomepageSentryOptions(): Sentry.CloudflareOptions {
         // Sentry v10 captures request bodies independently of the
         // dataCollection list. Never tee or await the exact-byte signed
         // internal streams before their bounded authenticators run.
-        ignoreRequestBody: (url) =>
-          new URL(url).pathname.startsWith("/api/v2/internal/"),
+        ignoreRequestBody: ignoresSentryRequestBody,
       }),
     ],
   };

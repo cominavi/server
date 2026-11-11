@@ -44,7 +44,10 @@ import { ServiceError } from "./service-error";
 import {
   admittedIdentityClause,
   assertSignInAllowed,
+  isIdentityAdmitted,
   redeemGrantInviteSQL,
+  signInNotAllowlisted,
+  type SignInAdmission,
 } from "./sign-in-allowlist";
 import {
   assertProviderProofAfterDeletion,
@@ -62,7 +65,7 @@ export interface AppleAuthenticationHooks {
 }
 
 interface StagedAppleAuthorization {
-  apple: AppleIdentity;
+  apple: AppleIdentity & SignInAdmission;
   providerTokens: AppleAuthorizationTokens;
 }
 
@@ -78,7 +81,7 @@ export async function authenticateAppleRequest(
   },
   jwtSecret: string,
   encryptionKey: string,
-  verifyIdentity: () => Promise<AppleIdentity>,
+  verifyIdentity: () => Promise<AppleIdentity & SignInAdmission>,
   exchangeAuthorizationCode: (
     identity: AppleIdentity,
   ) => Promise<AppleAuthorizationTokens>,
@@ -180,7 +183,14 @@ export async function authenticateAppleRequest(
   ) {
     throw unavailableAppleGrant();
   }
-  await assertSignInAllowed(database, "apple", apple.subject, grantHash, now);
+  await assertSignInAllowed(
+    database,
+    "apple",
+    apple.subject,
+    grantHash,
+    now,
+    apple.reviewAccount,
+  );
   const claimNow = clock();
   await claimAppleRequest(
     database,
@@ -250,7 +260,7 @@ async function claimAppleRequest(
   payloadHash: string,
   grantHash: string,
   nonceHash: string,
-  apple: AppleIdentity,
+  apple: AppleIdentity & SignInAdmission,
   subjectDigest: string,
   observed: { userID: number; authVersion: number } | null,
   now: number,
@@ -265,6 +275,7 @@ async function claimAppleRequest(
         nonceHash,
         appleEntryAudience,
         now,
+        apple.reviewAccount,
       ),
       parameterizedSQL(
         `INSERT INTO apple_auth_requests (
@@ -332,7 +343,7 @@ async function claimAppleRequest(
              consumed_request_id = ?2, consumed_payload_hash = ?3
            WHERE grant_hash = ?4 AND nonce_hash = ?5 AND audience = ?6
              AND expires_at > ?1 AND consumed_at IS NULL
-             AND ${admittedIdentityClause("'apple'", "?7")}
+             AND (?8 = 1 OR ${admittedIdentityClause("'apple'", "?7")})
              AND EXISTS (
                SELECT 1 FROM apple_auth_requests
                WHERE request_id = ?2 AND payload_hash = ?3
@@ -346,6 +357,7 @@ async function claimAppleRequest(
           nonceHash,
           appleEntryAudience,
           apple.subject,
+          apple.reviewAccount ? 1 : 0,
         ],
       ),
       parameterizedSQL(
@@ -491,7 +503,7 @@ function loadAppleRequestMetadata(database: D1Database, requestID: string) {
 
 async function commitAppleAuthentication(
   database: D1Database,
-  apple: AppleIdentity,
+  apple: AppleIdentity & SignInAdmission,
   providerTokens: AppleAuthorizationTokens,
   input: {
     requestID: string;
@@ -510,6 +522,27 @@ async function commitAppleAuthentication(
   clock: () => number,
   hooks: AppleAuthenticationHooks,
 ): Promise<AppleAuthenticationResult> {
+  // Admission is checked again here: the entry may have been revoked while
+  // Apple exchanged the code. A refused request queues the exchanged Apple
+  // refresh token for revocation and drops the staged secret.
+  if (
+    !(await isIdentityAdmitted(
+      database,
+      "apple",
+      apple.subject,
+      apple.reviewAccount,
+    ))
+  ) {
+    await refuseStagedAppleAuthorization(
+      database,
+      input.requestID,
+      payloadHash,
+      providerTokens,
+      encryptionKey,
+      clock(),
+    );
+    throw signInNotAllowlisted("apple");
+  }
   const existing = await createDatabase(database)
     .select({
       identity_id: sql<number>`${userIdentities.id}`.as("identity_id"),
@@ -916,7 +949,8 @@ async function commitAppleAuthentication(
                AND result_token_hash = ?3
            ) AND (?4 IS NULL OR EXISTS (
              SELECT 1 FROM apple_provider_revocations WHERE id = ?4
-           )) THEN 1 ELSE 0 END,
+           )) AND (?6 = 1 OR ${admittedIdentityClause("'apple'", "?7")})
+           THEN 1 ELSE 0 END,
            ?5
          )`,
       [
@@ -925,6 +959,8 @@ async function commitAppleAuthentication(
         prepared.tokenHash,
         displacedRevocation?.id ?? null,
         finalNow,
+        apple.reviewAccount ? 1 : 0,
+        apple.subject,
       ],
     ),
   );
@@ -1178,6 +1214,52 @@ export async function processAppleRevocations(
     }
   }
   return completed;
+}
+
+async function refuseStagedAppleAuthorization(
+  database: D1Database,
+  requestID: string,
+  payloadHash: string,
+  providerTokens: AppleAuthorizationTokens,
+  encryptionKey: string,
+  now: number,
+): Promise<void> {
+  const id = `refused:${requestID}`;
+  const aad = `apple-provider-revocation:v1:${id}`;
+  const encrypted = await encryptString(
+    JSON.stringify({ refreshToken: providerTokens.refreshToken }),
+    encryptionKey,
+    aad,
+  );
+  await runDrizzleBatch(database, [
+    parameterizedSQL(
+      `INSERT INTO apple_provider_revocations (
+           id, client_id, aad, nonce, ciphertext, state, attempt_count,
+           lease_id, lease_expires_at, available_at, last_error,
+           created_at, updated_at
+         )
+         SELECT ?1, ?2, ?3, ?4, ?5, 'queued', 0, NULL, NULL, ?6, NULL, ?6, ?6
+         FROM apple_auth_requests
+         WHERE request_id = ?7 AND payload_hash = ?8 AND state = 'staged'
+         ON CONFLICT(id) DO NOTHING`,
+      [
+        id,
+        providerTokens.clientID,
+        aad,
+        encrypted.nonce,
+        encrypted.ciphertext,
+        now,
+        requestID,
+        payloadHash,
+      ],
+    ),
+    parameterizedSQL(
+      `UPDATE apple_auth_requests SET state = 'indeterminate',
+           stage_nonce = NULL, stage_ciphertext = NULL, updated_at = ?3
+         WHERE request_id = ?1 AND payload_hash = ?2 AND state = 'staged'`,
+      [requestID, payloadHash, now],
+    ),
+  ]);
 }
 
 async function prepareDisplacedAppleCredential(
