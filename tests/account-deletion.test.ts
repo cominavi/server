@@ -81,6 +81,12 @@ test("account deletion fences auth, tombstones owned plans, revokes Apple, and f
     database.rows(`SELECT id FROM users WHERE id = ${userID}`),
     [],
   );
+  assert.deepEqual(
+    database.rows(
+      "SELECT provider_subject FROM sign_in_allowlist ORDER BY provider_subject",
+    ),
+    [{ provider_subject: "apple.crash-safe.subject" }],
+  );
   assert.deepEqual(database.rows("SELECT id FROM shared_plans ORDER BY id"), [
     { id: "other-plan-0000000002" },
   ]);
@@ -358,9 +364,16 @@ function setup(): SQLiteD1Database {
       "migrations/0003_accounts_shared_plans.sql",
       "migrations/0004_sanitized_catalog.sql",
       "migrations/0005_shared_plan_crdt_notifications.sql",
+      "migrations/0014_sign_in_allowlist.sql",
     ]
       .map((path) => readFileSync(path, "utf8"))
-      .join("\n"),
+      .join("\n") +
+      `
+      INSERT INTO sign_in_allowlist (
+        entry_id, label, provider, provider_subject, bound_at, created_at
+      ) VALUES
+        ('00000000000000000000000000000001', 'test', 'apple', 'apple.delete.subject', 1, 1),
+        ('00000000000000000000000000000002', 'test', 'apple', 'apple.crash-safe.subject', 1, 1);`,
   );
 }
 

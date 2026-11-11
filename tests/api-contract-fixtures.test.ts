@@ -523,7 +523,10 @@ test("Apple entry callback and full session replay DTOs match the route serializ
   assert.equal(entryGrant?.operationId, "issueAppleAuthenticationEntryGrant");
   assert.deepEqual(entryGrant?.security, []);
   assert.ok(entryGrant?.responses?.["200"]);
-  const callbackRoute = readFileSync("src/pages/auth/apple.ts", "utf8");
+  const callbackRoute = readFileSync(
+    "src/lib/server/sign-in-entry-page.ts",
+    "utf8",
+  );
   for (const field of ["entryGrant", "expiresAt", "nonce"])
     assert.match(callbackRoute, new RegExp(`searchParams\\.set\\("${field}"`));
 });

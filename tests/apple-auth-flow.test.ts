@@ -9,6 +9,10 @@ import {
   processAppleRevocations,
 } from "../src/lib/server/apple-auth-flow";
 import { issueAppleEntryGrant } from "../src/lib/server/apple-entry-grants";
+import {
+  handleEntryPageGET,
+  handleEntryPagePOST,
+} from "../src/lib/server/sign-in-entry-page";
 import { SQLiteD1Database } from "./sqlite-d1";
 
 const secret = "test-jwt-secret-that-is-at-least-thirty-two-bytes";
@@ -626,8 +630,41 @@ test("Apple operations remain special-entry only and AASA includes the deliberat
     "utf8",
   );
   assert.ok(association.includes('"/auth/apple"'));
-  assert.ok(
-    readFileSync("src/pages/auth/apple.ts", "utf8").includes("no-store"),
+  // Every entry-page response (form, callback redirect, refusal) is no-store.
+  const database = setup();
+  const env = {
+    COMINAVI_DB: database.binding,
+    COMINAVI_INVITE_RATE_LIMITER: { limit: async () => ({ success: true }) },
+  };
+  const responses = [
+    await handleEntryPageGET(
+      "apple",
+      new Request(`https://cominavi.net/auth/apple?nonce=${nonce}`),
+      env,
+    ),
+    await handleEntryPagePOST(
+      "apple",
+      new Request("https://cominavi.net/auth/apple", {
+        method: "POST",
+        body: new URLSearchParams({ nonce }),
+      }),
+      env,
+    ),
+    await handleEntryPageGET(
+      "apple",
+      new Request("https://cominavi.net/auth/apple"),
+      env,
+    ),
+  ];
+  for (const response of responses)
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.match(
+    responses[1]!.headers.get("Location")!,
+    /^cominavi:\/\/auth\/apple\/grant\?/,
+  );
+  assert.match(
+    readFileSync("src/pages/auth/apple.ts", "utf8"),
+    /handleEntryPage(GET|POST)\("apple"/,
   );
 });
 
@@ -663,8 +700,14 @@ function setup(): SQLiteD1Database {
       "migrations/0003_accounts_shared_plans.sql",
       "migrations/0004_sanitized_catalog.sql",
       "migrations/0005_shared_plan_crdt_notifications.sql",
+      "migrations/0014_sign_in_allowlist.sql",
     ]
       .map((path) => readFileSync(path, "utf8"))
-      .join("\n"),
+      .join("\n") +
+      `
+      INSERT INTO sign_in_allowlist (
+        entry_id, label, provider, provider_subject, bound_at, created_at
+      ) VALUES
+        ('00000000000000000000000000000001', 'test', 'apple', 'apple.subject.42', 1, 1);`,
   );
 }

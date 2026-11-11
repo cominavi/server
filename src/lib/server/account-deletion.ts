@@ -334,6 +334,21 @@ export async function requestAccountDeletion(
          )`,
       [identity.userID, input.requestID, payloadHash],
     ),
+    // Allowlist entries hold the raw provider subject and an owner label.
+    // Erase them with the account; a returning friend needs a new invite.
+    parameterizedSQL(
+      `DELETE FROM sign_in_allowlist
+         WHERE provider IS NOT NULL AND EXISTS (
+           SELECT 1 FROM user_identities AS identity
+           JOIN users AS user ON user.id = identity.user_id
+           WHERE identity.provider = sign_in_allowlist.provider
+             AND identity.provider_environment = ''
+             AND identity.provider_subject = sign_in_allowlist.provider_subject
+             AND user.id = ?1 AND user.deletion_request_id = ?2
+             AND user.deletion_payload_hash = ?3
+         )`,
+      [identity.userID, input.requestID, payloadHash],
+    ),
     parameterizedSQL(
       `UPDATE apple_auth_requests SET apple_subject = apple_subject_digest,
            provider_email = NULL, display_name = NULL, updated_at = ?1

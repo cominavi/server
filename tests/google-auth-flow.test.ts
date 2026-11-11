@@ -572,8 +572,14 @@ function setup(): SQLiteD1Database {
       "migrations/0003_accounts_shared_plans.sql",
       "migrations/0004_sanitized_catalog.sql",
       "migrations/0005_shared_plan_crdt_notifications.sql",
+      "migrations/0014_sign_in_allowlist.sql",
     ]
       .map((path) => readFileSync(path, "utf8"))
-      .join("\n"),
+      .join("\n") +
+      `
+      INSERT INTO sign_in_allowlist (
+        entry_id, label, provider, provider_subject, bound_at, created_at
+      ) VALUES
+        ('00000000000000000000000000000001', 'test', 'google', 'google-subject-42', 1, 1);`,
   );
 }
