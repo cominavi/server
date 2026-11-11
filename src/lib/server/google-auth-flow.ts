@@ -21,6 +21,11 @@ import {
   assertProviderProofAfterDeletion,
   providerSubjectDigest,
 } from "./provider-tombstones";
+import {
+  admittedIdentitySQL,
+  assertSignInAllowed,
+  redeemGrantInviteSQL,
+} from "./sign-in-allowlist";
 import { loadUserProfile, type UserProfile } from "./users";
 
 const entryAudience = "cominavi-ios-google-sign-in";
@@ -144,6 +149,7 @@ export async function completeGoogleAuthentication(
   ) {
     throw unavailableGoogleGrant();
   }
+  await assertSignInAllowed(database, "google", google.subject, grantHash, now);
   const createsUser = !existing;
   const userID = existing?.userID ?? randomInternalID();
   const identityID = existing?.identityID ?? randomInternalID();
@@ -182,7 +188,16 @@ export async function completeGoogleAuthentication(
     `google-auth-result:v1:${requestID}`,
   );
   const finalNow = clock();
-  const statements: SQLWrapper[] = [];
+  const statements: SQLWrapper[] = [
+    redeemGrantInviteSQL(
+      "google",
+      google.subject,
+      grantHash,
+      nonceHash,
+      entryAudience,
+      finalNow,
+    ),
+  ];
   if (createsUser) {
     statements.push(
       sql`INSERT INTO users (
@@ -294,6 +309,7 @@ export async function completeGoogleAuthentication(
          WHERE grant_hash = ${grantHash} AND nonce_hash = ${nonceHash}
            AND audience = ${entryAudience} AND expires_at > ${finalNow}
            AND consumed_at IS NULL
+           AND ${admittedIdentitySQL("google", google.subject)}
            AND EXISTS (
              SELECT 1 FROM user_identities AS identity
              JOIN users AS user ON user.id = identity.user_id

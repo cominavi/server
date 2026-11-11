@@ -1133,6 +1133,7 @@ export const googleEntryGrants = sqliteTable(
     createdAt: integer("created_at").notNull(),
     consumedRequestID: text("consumed_request_id"),
     consumedPayloadHash: text("consumed_payload_hash"),
+    allowlistEntryID: text("allowlist_entry_id"),
   },
   (table) => [
     index("google_entry_grants_expiry").on(table.expiresAt),
@@ -3390,6 +3391,61 @@ export const sharedPlanEventRecipients = sqliteTable(
   ],
 );
 
+export const signInAllowlist = sqliteTable(
+  "sign_in_allowlist",
+  {
+    entryID: text("entry_id").primaryKey(),
+    label: text("label").notNull(),
+    inviteCodeHash: text("invite_code_hash"),
+    inviteExpiresAt: integer("invite_expires_at"),
+    provider: text("provider", { enum: ["google", "apple"] as const }),
+    providerSubject: text("provider_subject"),
+    boundAt: integer("bound_at"),
+    createdAt: integer("created_at").notNull(),
+    revokedAt: integer("revoked_at"),
+  },
+  (table) => [
+    unique().on(table.inviteCodeHash),
+    uniqueIndex("sign_in_allowlist_active_identity")
+      .on(table.provider, table.providerSubject)
+      .where(sql.raw("provider IS NOT NULL AND revoked_at IS NULL")),
+    check(
+      "sign_in_allowlist_check_1",
+      sql.raw("length(entry_id) = 32 AND entry_id NOT GLOB '*[^0-9a-f]*'"),
+    ),
+    check(
+      "sign_in_allowlist_check_2",
+      sql.raw("length(trim(label)) BETWEEN 1 AND 200"),
+    ),
+    check(
+      "sign_in_allowlist_check_3",
+      sql.raw("invite_code_hash IS NULL OR length(invite_code_hash) = 64"),
+    ),
+    check(
+      "sign_in_allowlist_check_4",
+      sql.raw("provider IS NULL OR provider IN ('google', 'apple')"),
+    ),
+    check(
+      "sign_in_allowlist_check_5",
+      sql.raw(
+        "provider_subject IS NULL OR length(provider_subject) BETWEEN 1 AND 255",
+      ),
+    ),
+    check(
+      "sign_in_allowlist_check_6",
+      sql.raw("(provider IS NULL) = (provider_subject IS NULL)"),
+    ),
+    check(
+      "sign_in_allowlist_check_7",
+      sql.raw("(provider IS NULL) = (bound_at IS NULL)"),
+    ),
+    check(
+      "sign_in_allowlist_check_8",
+      sql.raw("invite_code_hash IS NOT NULL OR provider IS NOT NULL"),
+    ),
+  ],
+);
+
 export const migratedTables = {
   account_deletion_apple_revocations: accountDeletionAppleRevocations,
   account_deletion_atomic_assertions: accountDeletionAtomicAssertions,
@@ -3478,6 +3534,7 @@ export const migratedTables = {
   shared_plan_notification_deliveries: sharedPlanNotificationDeliveries,
   shared_plan_requests: sharedPlanRequests,
   shared_plans: sharedPlans,
+  sign_in_allowlist: signInAllowlist,
   social_posts: socialPosts,
   user_favorites: userFavorites,
   user_identities: userIdentities,

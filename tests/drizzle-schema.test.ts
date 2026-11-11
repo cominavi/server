@@ -21,6 +21,7 @@ const migrations = [
   "migrations/0010_shinagaki_analysis.sql",
   "migrations/0011_catalog_identity.sql",
   "migrations/0012_curated_decisions.sql",
+  "migrations/0014_sign_in_allowlist.sql",
 ];
 
 const expectedTextEnums: Record<string, string[]> = {
@@ -156,6 +157,7 @@ const expectedTextEnums: Record<string, string[]> = {
     "suppressed",
   ],
   "shared_plan_requests.result_status": ["active", "archived"],
+  "sign_in_allowlist.provider": ["google", "apple"],
   "shinagaki_analysis_records.status": ["complete", "partial", "insufficient"],
   "user_identities.provider": ["circlems", "google", "apple"],
   "user_identities.provider_environment": ["", "production", "sandbox"],

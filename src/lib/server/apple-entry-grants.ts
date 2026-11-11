@@ -18,6 +18,7 @@ export async function issueAppleEntryGrant(
   database: D1Database,
   nonce: string,
   nowMilliseconds = Date.now(),
+  allowlistEntryID: string | null = null,
 ): Promise<{ entryGrant: string; expiresAt: string }> {
   const now = Math.floor(nowMilliseconds / 1_000);
   const expiresAt = now + grantLifetimeSeconds;
@@ -43,6 +44,7 @@ export async function issueAppleEntryGrant(
       expiresAt,
       consumedAt: null,
       createdAt: now,
+      allowlistEntryID,
     }),
   ]);
   if ((results[1]?.meta.changes ?? 0) !== 1) throw invalidGrant();

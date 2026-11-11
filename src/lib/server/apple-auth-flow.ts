@@ -42,6 +42,11 @@ import { appleEntryAudience } from "./apple-entry-grants";
 import type { CominaviIdentity } from "./cominavi-auth";
 import { ServiceError } from "./service-error";
 import {
+  admittedIdentityClause,
+  assertSignInAllowed,
+  redeemGrantInviteSQL,
+} from "./sign-in-allowlist";
+import {
   assertProviderProofAfterDeletion,
   providerSubjectDigest,
 } from "./provider-tombstones";
@@ -175,6 +180,7 @@ export async function authenticateAppleRequest(
   ) {
     throw unavailableAppleGrant();
   }
+  await assertSignInAllowed(database, "apple", apple.subject, grantHash, now);
   const claimNow = clock();
   await claimAppleRequest(
     database,
@@ -252,6 +258,14 @@ async function claimAppleRequest(
   const codeHash = await sha256Hex(input.authorizationCode);
   try {
     await runDrizzleBatch(database, [
+      redeemGrantInviteSQL(
+        "apple",
+        apple.subject,
+        grantHash,
+        nonceHash,
+        appleEntryAudience,
+        now,
+      ),
       parameterizedSQL(
         `INSERT INTO apple_auth_requests (
              request_id, payload_hash, grant_hash, nonce_hash,
@@ -318,6 +332,7 @@ async function claimAppleRequest(
              consumed_request_id = ?2, consumed_payload_hash = ?3
            WHERE grant_hash = ?4 AND nonce_hash = ?5 AND audience = ?6
              AND expires_at > ?1 AND consumed_at IS NULL
+             AND ${admittedIdentityClause("'apple'", "?7")}
              AND EXISTS (
                SELECT 1 FROM apple_auth_requests
                WHERE request_id = ?2 AND payload_hash = ?3
@@ -330,6 +345,7 @@ async function claimAppleRequest(
           grantHash,
           nonceHash,
           appleEntryAudience,
+          apple.subject,
         ],
       ),
       parameterizedSQL(
